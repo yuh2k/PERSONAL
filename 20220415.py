@@ -1,5 +1,4 @@
-
-def fourSum(nums, target):
+def fourSum1(nums, target):
 
     nums.sort()
 
