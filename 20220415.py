@@ -28,7 +28,7 @@ def fourSum1(nums, target):
         for i, num in enumerate(nums):
             sum_of_rest_three = target - num
             sub_array = nums[i + 1: len(nums)]
-            temp_array = three_sum(sub_array, sum_of_rest_three)   # two sum result of the subarray
+            temp_array = three_sum(sub_array, sum_of_rest_three)   # three_sum result of the subarray
             if temp_array:
                 for item in temp_array:
                     if item + [num] not in res:
