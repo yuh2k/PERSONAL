@@ -98,10 +98,7 @@ def fourSum(nums, target):
         for j in range(i + 1, length - 2):
             if j > i + 1 and nums[j] == nums[j - 1]: 
                 continue
-            if nums[i] + nums[j] + nums[j + 1] + nums[j + 2] > target:
-                break
-            if nums[i] + nums[j] + nums[length - 2] + nums[length - 1] < target:
-                continue
+                
             left, right = j + 1, length - 1
 
             while left < right:
