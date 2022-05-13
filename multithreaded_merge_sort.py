@@ -4,6 +4,8 @@ import math
 import multiprocessing as mp
 import time
 
+from numpy import size
+
 
 def merge_sort(array):
 
@@ -57,23 +59,25 @@ def mergeSortParallel(data, threads):
     return data[0]
 
 if __name__ == "__main__":
-    print('start')
-    array = [random.randint(0, 10000) for i in range(10000)]
+    size, max_threads = 1000000, 12
+    array = [random.randint(0, 10000) for i in range(size)]
+    print('Array Size:', size)
     res = []
     start_time = time.time()
     result = sorted(array)
     end_time = time.time()
     
-    print("Built-in Sort:", end_time-start_time)
+    print("Built-in Sort:", end_time-start_time,'s')
 
-    max_threads = 12
+    
     
     for i in range(1, max_threads + 1):
         start_time = time.time()
         result = mergeSortParallel(array, i)
-        print(result)
+        # print(result)
         end_time = time.time()
         print("Threads:" , i, end_time - start_time,'s')
+
 '''
 Array Size: 100
 Built-in Sort: 0.0 s
@@ -107,25 +111,6 @@ Threads: 10 0.37199997901916504 s
 Threads: 11 0.38900279998779297 s
 Threads: 12 0.40599989891052246 s
 '''
-
-'''
-Array Size: 10000
-Built-in Sort: 0.0010001659393310547 s
-Threads: 1 0.27899885177612305 s
-Threads: 2 0.24399614334106445 s
-Threads: 3 0.2709999084472656 s
-Threads: 4 0.2500007152557373 s
-Threads: 5 0.2629985809326172 s
-Threads: 6 0.3040018081665039 s
-Threads: 7 0.32399892807006836 s
-Threads: 8 0.3280014991760254 s
-Threads: 9 0.37000060081481934 s
-Threads: 10 0.39600300788879395 s
-Threads: 11 0.4360024929046631 s
-Threads: 12 0.42499494552612305 s
-'''
-
-
 
 '''
 Array Size: 10000
