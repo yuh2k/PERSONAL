@@ -25,7 +25,7 @@
 
 python3 build.py 的输出 dist/site 是完整静态站点。上传该目录到有权限的 Cloudflare Pages、Netlify 或任意静态托管即可。
 
-仓库根目录 .github/workflows/deploy-ml-infra.yml 支持 GitHub Pages。先在 Settings → Pages 选择 GitHub Actions，再推送 main 或手动运行工作流。工作流只发布本子目录，保留原来的 Python 算法文件。相对路径和 hash 路由同时支持根路径和 /PERSONAL/ 项目路径。
+仓库根目录 .github/workflows/deploy-ml-infra.yml 支持 GitHub Pages，已推送独立的 codex/ml-infra-prep 分支。先在 Settings → Pages 选择 GitHub Actions，再重跑工作流；也支持 main 或部署分支的新推送。部署前先上传 ml-infra-ready-to-use 构建产物，即使 Pages 设置未完成也可下载部署/离线包。工作流只发布本子目录，保留原来的 Python 算法文件。相对路径和 hash 路由同时支持根路径和 /PERSONAL/ 项目路径。
 
 只有部署成功且实际 HTTP 验证后，才能把云端 URL 作为已交付地址。离线交付 offline.zip 含完整网站和 labs.zip；解压后启动 Python 静态服务即可。进度另行导出 JSON。
 

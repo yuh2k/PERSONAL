@@ -28,6 +28,16 @@ jobs:
         run: PYTHONPATH=labs/reference python3 -m unittest discover -s labs -v
       - name: Build static site
         run: python3 ml-infra-prep/build.py
+      - name: Save ready-to-use deployment and offline packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-infra-ready-to-use
+          overwrite: true
+          path: |
+            ml-infra-prep/site-deploy.zip
+            ml-infra-prep/offline.zip
+            ml-infra-prep/labs.zip
+          retention-days: 30
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

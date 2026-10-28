@@ -31,9 +31,11 @@
 
 ## 部署
 
-部署分支 codex/ml-infra-prep 会触发仓库根目录的 GitHub Pages 工作流；main 分支保持原样。Pages 是否允许部署，以实际 Actions 结果为准。API 请求目前也被 CONNECT 403 阻挡，Git read 和 push dry-run 已验证，不能据此推导 Pages 管理权限。
+已成功推送部署分支 codex/ml-infra-prep；main 分支保持原样。实际云端运行 https://github.com/yuh2k/PERSONAL/actions/runs/40740040949 的 JavaScript 检查、10 项参考测试和静态构建已通过，部署在 actions/configure-pages 阶段失败：Get Pages site failed / HTTP 404，仓库尚未启用 GitHub Pages。
 
-如果仓库尚未启用 Pages，需仓库管理员在 Settings → Pages 选择 GitHub Actions；官方 actions/configure-pages 说明默认 GITHUB_TOKEN 无法自行启用 Pages。请勿把环境配置发布与网站部署混为一谈。
+需仓库管理员在 https://github.com/yuh2k/PERSONAL/settings/pages 的 Build and deployment → Source 选择 GitHub Actions，然后重跑工作流。官方 actions/configure-pages 说明默认 GITHUB_TOKEN 无法自行启用 Pages，因此不能在没有所需管理能力时声称已发布。
+
+工作流会在部署前先保存 ml-infra-ready-to-use 构建产物，包含 site-deploy.zip、offline.zip 和 labs.zip；即使 Pages 设置未完成也能下载交付包。Pages 成功后仍需实际 HTTP 验证 URL。当前运行环境的 GitHub API 和托管域名访问还受 CONNECT 403 限制。环境配置发布不等于网站部署。
 
 ## 复现命令
 
