@@ -1,0 +1,37 @@
+name: Deploy ML Infra study site
+on:
+  push:
+    branches: [main, codex/ml-infra-prep]
+    paths: ["ml-infra-prep/**", ".github/workflows/deploy-ml-infra.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: ml-infra-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript
+        run: |
+          node --check ml-infra-prep/app.js
+          node --check ml-infra-prep/curriculum.js
+      - name: Check lab reference
+        working-directory: ml-infra-prep
+        run: PYTHONPATH=labs/reference python3 -m unittest discover -s labs -v
+      - name: Build static site
+        run: python3 ml-infra-prep/build.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ml-infra-prep/dist/site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#172621">
+  <meta name="description" content="为后端工程师设计的 14–21 天 DoorDash ML Infrastructure 中文面试备考工作台。课程、实战、模拟面试与本地学习进度。">
+  <title>跃迁 · DoorDash ML Infra 备考工作台</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./curriculum.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <aside class="sidebar" aria-label="主要导航">
+    <a class="brand" href="#home"><span class="brand-mark">↗</span><span>跃迁<span class="brand-en">ML INFRA LAB</span></span></a>
+    <div class="workspace-label">你的面试备考工作台 <span class="live-dot"></span></div>
+    <nav id="navigation"></nav>
+    <div class="sidebar-bottom"><div class="mini-label">BUILT ON YOUR STRENGTHS</div><p>从分布式系统，<br>走向机器学习基础设施。</p><div class="stack">Go · Kafka · Flink · Redis · K8s</div><div class="privacy-note">进度仅保存在当前浏览器<br>建议定期导出备份</div></div>
+  </aside>
+  <div class="shell">
+    <header class="topbar"><div><span class="breadcrumb">学习空间</span><span class="separator">/</span><span id="page-name">学习总览</span></div><div class="top-actions"><span class="save-status" id="save-status">本地进度</span><button class="icon-btn" id="settings-button" aria-label="打开学习设置">⚙</button></div></header>
+    <main id="main" tabindex="-1"></main>
+    <footer>为你的下一次跃迁而准备。<span>独立学习工具 · 非 DoorDash 官方课程 · 题目为模拟练习</span></footer>
+  </div>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">学习设置与备份</h2><button class="icon-btn" data-close="settings-dialog" aria-label="关闭设置">✕</button></div><div id="settings-content"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <noscript>请开启 JavaScript 使用课程、进度与复习功能。课程数据也可在离线包的 curriculum.js 中阅读。</noscript>
+</body>
+</html>
