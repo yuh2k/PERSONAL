@@ -4,7 +4,7 @@ import shutil
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-FILES = ["index.html", "style.css", "curriculum.js", "app.js", "sw.js", "icon.svg", "manifest.webmanifest"]
+FILES = ["index.html", "style.css", "curriculum.js", "app.js", "interviews.js", "interview-ui.js", "interview.css", "research-audit.json", "RESEARCH.md", "sw.js", "icon.svg", "manifest.webmanifest"]
 
 
 def build():

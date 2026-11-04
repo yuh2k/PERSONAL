@@ -45,6 +45,42 @@ def run():
             page.screenshot(path=str(OUT / "desktop.png"), full_page=True)
             passed("21 complete lessons / 42 quizzes / valid schedule and references")
 
+            page.goto(url + "#interviews")
+            expect(page.locator("h1")).to_contain_text("ML 专项")
+            expect(page.locator(".research-availability")).to_be_visible()
+            assert page.evaluate("INTERVIEW_RESEARCH.entries.length") == 23
+            assert page.evaluate("INTERVIEW_RESEARCH.entries.filter(e=>e.kind==='candidate'||e.kind==='repost').length") == 0
+            assert page.evaluate("INTERVIEW_RESEARCH.entries.every(e=>e.reportedQuestions.length===0&&e.evidenceUrl.startsWith('https://')&&e.lessons.every(id=>LESSONS.some(l=>l.id===id)))")
+            assert page.evaluate("new Set(INTERVIEW_RESEARCH.entries.map(e=>e.id)).size") == 23
+            assert page.evaluate("(()=>{const s=blankState();delete s.research;return validState(s);})()")
+            assert page.evaluate("(()=>{const s=blankState();s.research.bad={saved:true};return !validState(s);})()")
+            first_id=page.evaluate("INTERVIEW_RESEARCH.entries[0].id")
+            first=page.locator('[data-research-id="'+first_id+'"]')
+            first.locator('[data-research-toggle="saved"]').click()
+            first.locator('[data-research-toggle="read"]').click()
+            first.locator('.research-note summary').click()
+            first.locator('textarea').fill('<img src=x onerror="window.RESEARCH_INJECTED=1"> 需要复习 CPU throttling')
+            page.reload()
+            assert page.evaluate("state.research[INTERVIEW_RESEARCH.entries[0].id].saved")
+            assert page.evaluate("state.research[INTERVIEW_RESEARCH.entries[0].id].read")
+            assert page.evaluate("window.RESEARCH_INJECTED") is None
+            page.locator('#research-search').fill('不存在的面经xyz123')
+            expect(page.locator('.research-empty')).to_be_visible()
+            page.locator('[data-research-reset]').first.click()
+            page.locator('#research-kind').select_option('candidate')
+            expect(page.locator('.research-empty')).to_be_visible()
+            page.locator('#research-kind').select_option('official')
+            expect(page.locator('.research-card')).to_have_count(6)
+            page.locator('[data-research-status="saved"]').click()
+            expect(page.locator('.research-card')).to_have_count(1)
+            page.locator('[data-research-reset]').first.click()
+            page.locator('#research-search').fill('Redis')
+            assert page.locator('.research-card').count()>0
+            page.locator('[data-research-reset]').first.click()
+            page.screenshot(path=str(OUT/'research-desktop.png'))
+            passed("Research provenance counts, source/search filters, saved/read/escaped notes and old-backup compatibility")
+            page.goto(url+'#home')
+
             page.locator('[data-task="foundations:read"]').check()
             page.reload()
             expect(page.locator('[data-task="foundations:read"]')).to_be_checked()
@@ -139,6 +175,7 @@ def run():
             exported = json.loads(backup_path.read_text())
             assert exported["tasks"]["foundations:read"]
             assert exported["stars"]["failure"]["action"]
+            assert exported["research"][first_id]["saved"]
             assert page.evaluate("(()=>{const s=JSON.parse(JSON.stringify(state));s.answers['foundations:01']=1;return !validState(s);})()")
             page.locator("#import-file").set_input_files({"name": "invalid.json", "mimeType": "application/json", "buffer": b'{"version":1}'})
             expect(page.locator("#toast")).to_contain_text("导入失败")
@@ -149,8 +186,10 @@ def run():
             page.locator("#settings-button").click()
             page.once("dialog", lambda dialog: dialog.accept())
             page.locator("#import-file").set_input_files(str(backup_path))
+            expect(page.locator("#settings-dialog")).not_to_be_visible()
             assert page.evaluate("state.tasks['foundations:read']") is True
             assert page.evaluate("state.stars.failure.action") == exported["stars"]["failure"]["action"]
+            assert page.evaluate("state.research[INTERVIEW_RESEARCH.entries[0].id].note") == exported["research"][first_id]["note"]
             passed("Downloadable lab ZIP and progress export/reset/import round-trip; invalid imports rejected")
 
             ids = page.evaluate("LESSONS.map(l=>l.id)")
@@ -167,17 +206,19 @@ def run():
             mobile = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, device_scale_factor=1, has_touch=True)
             mp = mobile.new_page()
             mp.on("pageerror", lambda error: errors.append(str(error)))
-            for route in ["home", "roadmap", "courses", "lesson/batching", "practice", "review", "resources"]:
+            for route in ["home", "roadmap", "courses", "lesson/batching", "practice", "review", "resources", "interviews"]:
                 mp.goto(url + "#" + route)
                 assert mp.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), route + " overflows mobile"
             mp.goto(url + "#home")
             mp.screenshot(path=str(OUT / "mobile.png"), full_page=True)
             mp.goto(url + "#lesson/batching")
             mp.screenshot(path=str(OUT / "mobile-lesson.png"), full_page=True)
-            expect(mp.locator("nav a")).to_have_count(6)
+            expect(mp.locator("nav a")).to_have_count(7)
             mp.locator('nav a[href="#practice"]').click()
             mp.locator('[data-practice-tab="design"]').click()
             mp.locator(".diagram").first.wait_for(state="attached")
+            mp.goto(url+"#interviews")
+            mp.screenshot(path=str(OUT/"research-mobile.png"))
             mobile.close()
             passed("390px mobile layouts, bottom navigation and responsive lesson/diagram")
 
@@ -191,6 +232,9 @@ def run():
             expect(page.locator("h1")).to_contain_text("LLM Inference")
             assert page.evaluate("fetch('./labs.zip').then(r=>r.ok)")
             assert page.evaluate("getComputedStyle(document.querySelector('.sidebar')).position") == "fixed"
+            page.goto(url+"#interviews")
+            expect(page.locator(".research-card")).to_have_count(23)
+            assert page.evaluate("fetch('./research-audit.json').then(r=>r.ok)")
             context.set_offline(False)
             passed("Actual network-off reload, cross-lesson navigation, styles and cached lab download")
             # Validate the actual downloadable artifact, not only source files.
