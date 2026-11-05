@@ -4,8 +4,12 @@
     "original_technical_sources_read": 6,
     "selected_indexed_leads": 17,
     "displayed_entries": 23,
-    "authored_practice_prompts": 30,
-    "practice_source_associations": 42
+    "legacy_authored_practice_prompts": 30,
+    "legacy_practice_source_associations": 42,
+    "deep_dive_guides": 23,
+    "answered_followups": 92,
+    "worked_examples": 23,
+    "guide_origin": "authored_practice_not_candidate_reports"
   },
   "english": {
     "scope": "Public English DoorDash ML System Design / ML Infrastructure Domain candidate experiences",
@@ -392,7 +396,7 @@
   },
   "official": {
     "scope": "Official background only; none of these entries is a candidate interview report or a confirmed DoorDash interview question.",
-    "checked_at": "2026-11-04",
+    "checked_at": "2026-11-05",
     "network": "Direct careersatdoordash.com and doordash.engineering requests fail at CONNECT with proxy 403. Official public GitHub repositories and raw.githubusercontent.com are readable.",
     "verified_sources": [
       {
@@ -405,9 +409,9 @@
         "date_note": "README publication date not stated; copyright 2026 is not a publication date.",
         "kind": "官方开源资料",
         "access": "原文已读，HTTP 200",
-        "evidence": "EPCAS is a Kubernetes operator for restart-free vertical CPU scaling; it watches ElasticWorkloadPolicy, samples CPU usage/throttling, and changes CPU requests via Pod resize.",
+        "evidence": "EPCAS is a Kubernetes operator for restart-free vertical CPU scaling; it watches ElasticWorkloadPolicy, samples CPU usage/throttling, and changes CPU requests via Pod resize. Follow-up verification of pinned actuator code: buildPatch sets both requests.cpu and limits.cpu to the target value.",
         "keypoints": [
-          "通过 Kubernetes Pod resize 子资源原地调整容器 CPU requests，重点是避免敏感服务重启。",
+          "通过 Kubernetes Pod resize 子资源原地调整 CPU；所核验 actuator 实现同时调整 requests.cpu 与 limits.cpu，重点是减少敏感服务重启。",
           "从 kubelet cAdvisor 采集 CPU usage 和 throttling，通过 API server node proxy 访问，不依赖 Prometheus。",
           "仅调整 policy 指定的容器，避免跟随应用容器一起无谓扩张 sidecar。",
           "明确区分 HPA 改副本数、Karpenter 改节点供给、VPA 偏长期推荐；EPCAS 不是它们的通用替代。",
@@ -424,7 +428,8 @@
             "answer": "可能没有足够 node headroom、实际瓶颈并非 CPU，或线程池/模型队列/下游尾延迟没变。观察控制动作是否完成、throttling、queue 和 inference 分解。",
             "lesson": "capacity"
           }
-        ]
+        ],
+        "implementation_evidence_url": "https://github.com/doordash-oss/elastic-cpu-pod-autoscaler/blob/700dd4e664e7ee84be623cf43448e8acaa108e5f/src/main/java/io/elasticcpu/operator/resize/PodResizeActuator.java#L137"
       },
       {
         "id": "official-agentico",
@@ -1198,5 +1203,24 @@
         }
       ]
     }
+  },
+  "technical_recheck": {
+    "checked_at": "2026-11-05",
+    "six_official_documents": "HTTP 200; original documentation re-read",
+    "candidate_reports_added": 0,
+    "blocked_retries": [
+      "One DoorDash original article: CONNECT 403",
+      "One Reddit search: CONNECT 403"
+    ],
+    "triton_server_commit": "25419f909746139d2bffc6c7dac351f8c95039e4",
+    "epcas_commit": "700dd4e664e7ee84be623cf43448e8acaa108e5f",
+    "triton_queue_policy_evidence": "https://github.com/triton-inference-server/common/blob/82f8bc7efd8f7d175122eb225ee0fb5c9eb3581d/protobuf/model_config.proto#L1060",
+    "corrections": [
+      "EPCAS inspected code changes BOTH CPU requests and limits",
+      "Batch formation delay does not bound total queue time or end-to-end deadline",
+      "Inference items / backend executions is average executed batch size, not requests per batch",
+      "Duration counters and averages of pod p99 do not determine global p99",
+      "Triton ensemble wrapper has no instance_group; component models can have it"
+    ]
   }
 }

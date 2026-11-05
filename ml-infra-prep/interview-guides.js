@@ -1,0 +1,2787 @@
+'use strict';
+const INTERVIEW_GUIDES = {
+  "official-epcas": {
+    "title": "模型不能频繁重启，CPU 扩容、HPA 和预热副本怎么选？",
+    "minutes": 45,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "EPCAS 的公开说明把一个运维问题变成控制器：服务 CPU 需求上升时，通过 Kubernetes 的 Pod resize 子资源原地调整资源，尽量保住现有进程。README 强调 CPU requests；本轮进一步核对固定提交的 PodResizeActuator.java，实际补丁把 requests.cpu 与 limits.cpu 同时设为目标值。它读取 kubelet cAdvisor 的 CPU 使用与 throttling 信号，通过 API server node proxy 访问。这里能确认的是开源代码机制，不能据此推断具体模型池的实际部署。",
+      "把它迁移到 ML serving，问题会更尖锐：新副本除了启动容器，还可能下载权重、初始化 runtime、装入显存并做 warm-up。原地扩 CPU 能避开部分启动成本，但只帮助 CPU 瓶颈，而且不创造 GPU。概念上 requests 影响调度和竞争份额，limits 才约束配额；该项目同时调整两者，不能把这两个概念混为一谈。下面是自编扩容演练，不假设所有控制器采用同样实现。"
+    ],
+    "prompt": "练习假设：推荐推理服务 p99 目标 100ms，午高峰流量在 20 秒内翻倍，模型新副本需要 90 秒预热。CPU throttling 与排队同时升高，GPU 利用率只有 35%。如何诊断并选择原地扩 CPU、水平扩容与预热容量？",
+    "clarify": [
+      "CPU requests 和 limits 分别是多少、哪个容器被节流？如果真正撞的是固定 CPU limit，只增 request 不能解释为已经解除配额上限。",
+      "GPU 低利用率是预处理喂不饱、特征 RPC 阻塞，还是采样窗口掩盖短时繁忙？只有分段 trace 和 CPU profile 能决定扩哪一层。",
+      "节点可分配 CPU、quota、K8s resize 能力与可接受降级是什么？没有节点余量时，原地 resize 可能 pending，需要其他节点的预热副本或削峰。"
+    ],
+    "concepts": [
+      {
+        "term": "CPU request / limit · 请求与上限",
+        "explanation": "request 决定调度预留以及竞争时的份额；limit 若配置，会限制容器可用的 CPU 时间。两者都可能影响性能，但不是同一个开关。"
+      },
+      {
+        "term": "Cold start / warm-up · 冷启动与预热",
+        "explanation": "模型服务 ready 不仅是进程存在，还包括权重可读、推理后端已初始化、代表性输入已跑通；这段时间新副本不能被算作有效容量。"
+      },
+      {
+        "term": "Control-loop lag · 控制环延迟",
+        "explanation": "指标被采集、控制器作决定、资源真正到位存在延迟。20 秒突发与 90 秒启动不匹配时，自动扩容无法挽救第一波，必须有提前准备的容量或限流。"
+      }
+    ],
+    "tests": [
+      "能把 GPU 空闲拆成上游供给不足与自身计算不足，而不是看到利用率低就缩容。",
+      "能解释原地扩资源的条件、requests/limits 区别以及 resize 尚未生效的状态。",
+      "能同时处理第一波流量、持续容量和控制环稳定性，用有界队列保护 p99。"
+    ],
+    "shortAnswer": "我先看请求在哪一段等待，把特征读取、CPU 预处理、队列和 GPU 执行分开，确认被节流的是哪一个容器。若 CPU 是瓶颈，节点有余量且支持原地调整，我会尝试 resize，并同时核对 limits，不能把增 request 当作解除限流。水平扩容用于持续负载，但 90 秒冷启动赶不上 20 秒突发，所以需要预热副本、提前扩容与 admission control。扩容成功的依据是可用吞吐提高、排队和拒绝率下降，而不只是副本数增加；缩容则设置稳定窗口，避免控制器互相拉扯。",
+    "deepAnswer": [
+      {
+        "title": "先证明瓶颈，不把相关性当因果",
+        "body": "同一个 trace 记录特征 RPC、预处理、排队、推理与序列化耗时，配合容器级 CPU usage、throttled time、线程池深度和 GPU 执行时间。GPU 35% 本身不足以下结论：它可能在等 CPU，也可能在等远端 Redis。做一台副本的受控资源调整，比较吞吐与延迟分布，避免把全池一起改导致无法归因。"
+      },
+      {
+        "title": "原地扩容要有资源与语义门槛",
+        "body": "检查 K8s/运行时对 CPU 原地 resize 的支持、Pod resizePolicy、节点 allocatable 和 namespace quota。控制器提出的 desired requests 与实际 allocated resources 分别观测；pending 不能算扩容成功。若固定 CPU limit 是节流根因，必须独立审查 limit 策略。原地扩容保留进程状态有价值，但如果预处理单线程、锁竞争或 I/O 阻塞，加核仍可能无效。"
+      },
+      {
+        "title": "用三种时间尺度管理容量",
+        "body": "毫秒到秒级以租户配额、最大 in-flight、最大排队时间和有业务意义的 fallback 保护已接收请求。几十秒到几分钟用 warm replicas 与水平扩容承接突发。更长时间用历史峰值和事件日历提前准备节点与模型。模型大时，温热副本成本很高，需比较一次过载的损失与常驻资源成本，并避免所有模型同时扩容把集群余量耗尽。"
+      },
+      {
+        "title": "控制器之间明确职责",
+        "body": "若 HPA 使用 CPU utilization，其分母通常涉及 CPU request；原地增 request 会改变比例，即使绝对 CPU 使用不变。垂直与水平控制器若各自追逐指标可能出现振荡。可让垂直控制器在限定范围内保护单副本 CPU，把水平容量决策放在队列年龄、可用吞吐和 SLO 上，并设置最小驻留时间、缩容冷却与每次变更上限。"
+      },
+      {
+        "title": "把扩容失败也纳入运行路径",
+        "body": "resize 无节点余量、模型 warm-up 失败或镜像拉取变慢都必须有告警与超时。保留可接流量的旧副本直到新容量实测 ready；用持续突发压测观察 p99、超时、拒绝、fallback 比例及每千次有效预测的成本。预算分配是设计目标，不能把各组件 p99 相加就声称得到了总 p99。"
+      }
+    ],
+    "architecture": "突发流量 → 有界准入 / deadline\n             ↓\n      预热模型副本池 → 特征与推理\n             ↑\nCPU / 队列 / SLO → 容量控制\n          ├ 原地 CPU resize\n          ├ 水平副本与节点\n          └ 提前预热与保底容量",
+    "calculation": {
+      "problem": "练习假设：单个预热副本在目标延迟下可承受 400 requests/s，峰值 2400 requests/s，计划只用其验证容量的 70%。",
+      "steps": [
+        "每副本规划承载量 = 400 × 0.70 = 280 requests/s。",
+        "需要 ceil(2400 / 280) = 9 个可用且预热完成的副本；启动中的副本不计入。",
+        "如果当前只有 5 个副本，可规划承载 1400 requests/s；未来 90 秒的缺口不会因提交了扩容请求而消失。"
+      ],
+      "conclusion": "9 是基于练习压测数据的容量估算，不保证真实 p99；请求 shape、特征延迟、batch 变化与共享节点竞争仍需重放测试。"
+    },
+    "followups": [
+      {
+        "question": "CPU request 翻倍后节流没变，下一步是什么？",
+        "answer": "先比较 request、limit 与实际 allocated resource，确认 resize 是否完成。若 limit 仍是 1 核，容器仍可能受同一配额约束；若已无节流而延迟不变，CPU 就不是主要瓶颈。继续用 profile 查单线程、锁竞争和 GC，用 trace 查特征 RPC 与队列。不能连续加资源直到指标偶然好转，也不能只凭 CPU 使用率下降证明吞吐改善。",
+        "signal": "资源语义与因果诊断。"
+      },
+      {
+        "question": "GPU 利用率低但 p99 很差，可以直接缩 GPU 吗？",
+        "answer": "不可以先缩。平均 GPU 利用率可能掩盖短时突发，也可能是 CPU、网络或 batching 策略让 GPU 等待。先区分端到端时间与设备执行时间，检查请求 shape、队列深度、batch 大小分布和预处理耗时。把一小部分流量迁到更小池子做容量实验，只有在成功率、尾延迟与质量均达标时，才把闲置解释为可回收容量。",
+        "signal": "避免局部利用率优化伤害端到端 SLO。"
+      },
+      {
+        "question": "HPA 与原地扩 CPU 为什么可能反复扩缩？",
+        "answer": "使用 CPU utilization 的 HPA 会受到 request 分母变化影响：增 request 可能让 utilization 比例骤降，从而触发水平缩容，随后剩下副本又变忙。要把两个环的目标、采样窗口和变更边界分开，记录每次动作及其后果。可采用队列或吞吐辅助水平决策，较慢的缩容、最小驻留时间和有限的垂直范围，但阈值仍须根据实测调节。",
+        "signal": "控制环耦合、稳定性与指标口径。"
+      },
+      {
+        "question": "预算不允许常驻两倍 warm replicas，如何覆盖峰值？",
+        "answer": "先区分可预测饭点与突然热点：前者定时预热，后者保留小额弹性余量并设置模型、租户的优先级。对可降级请求减少候选数、使用较轻且已验证的模型，明确质量代价并记录 fallback rate。对无法按时完成的低优先级请求快速拒绝，避免它们挤掉重要请求。成本比较要按满足时延和质量要求的有效预测计量，而不只是每小时 GPU 账单。",
+        "signal": "业务降级、成本与可用性的可解释取舍。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“CPU request 翻倍，就消除了所有 throttling。”",
+        "fix": "核对实际 limit、配额、resize 状态和 throttled time；request 不等于执行上限。"
+      },
+      {
+        "mistake": "“K8s 会自动扩，所以不用限制队列。”",
+        "fix": "扩容有延迟；有界 admission 与已预热容量才处理第一波，队列无界会让请求在过期后继续耗资源。"
+      },
+      {
+        "mistake": "“GPU 低于 50% 一定过度配置。”",
+        "fix": "先查上游 starvation、突发与 batch/shape 分布，使用端到端 SLO 验证可缩容量。"
+      }
+    ],
+    "bridge": "你可以用熟悉的 K8s 调度、CPU profile、线程池和背压解释诊断；新增的 ML 重点是权重装载与 warm-up 延迟、CPU/GPU 两段流水线、按模型分布变化的容量，以及降级模型会改变预测质量。把“副本 ready”换成“代表性推理已验证可用”。",
+    "english": "I would first separate feature-fetch latency, CPU preprocessing, queueing, and GPU execution. In-place CPU resizing helps only when CPU is the bottleneck and the node has headroom; a larger request does not automatically remove a CPU limit. Horizontal scaling addresses sustained load, while warm capacity and admission control protect the initial burst. I would validate the change against tail latency, rejection rate, and useful prediction throughput.",
+    "exercise": {
+      "task": "用 25 分钟画出一个 20 秒突发、90 秒冷启动的容量时间线，并写一页扩容 runbook。",
+      "deliverable": "一张按秒标注有效容量的图，加上 request/limit、resize pending、warm-up 失败三个排查分支。",
+      "checks": [
+        "按 2400 / (400×0.7) 向上取整得到 9 个有效副本。",
+        "图中提交扩容与副本 ready 相隔 90 秒，没有提前把新副本计入容量。",
+        "runbook 写出 CPU limit 不变、远端特征变慢、节点无余量时的不同动作。"
+      ]
+    },
+    "rubric": [
+      "能用一条 trace 指出 CPU 是瓶颈的证据和反证。",
+      "准确区分 request、limit 与 resize 实际生效状态。",
+      "给出首波保护与持续扩容两种不同动作。",
+      "解释 HPA 与垂直控制的潜在耦合。",
+      "用时延、拒绝、质量和成本四类结果验收。"
+    ]
+  },
+  "official-agentico": {
+    "title": "设计可恢复、可复现的 ML 实验与 Agent 开发平台",
+    "minutes": 45,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "已读的 Agentic Orchestrator README 描述的是持久化工程工作流：收集仓库上下文，研究和设计，拆分阶段计划，再实现、验证和审查。可以把它理解为把长对话里的隐含进度变成可保存、可核对的工作记录；流程中断之后，需要知道已完成什么、哪些证据仍然有效。它是公开工程工具，这里不把它认定为目标团队的内部 ML 实验平台。",
+      "下面把这个设计思想迁移到自编的 ML Developer Infrastructure 题：模型实验除了代码，还受训练数据、特征定义、运行环境和评估集影响。一个 Agent 即使生成了能运行的训练脚本，也不能仅凭“任务结束”就认定模型更好。平台必须把实验身份、产物、评估证据和发布权限串起来，才能让开发者放心重跑、比较和回退。"
+    ],
+    "prompt": "自编演练：让 20 名模型开发者使用 Agent 提交训练和评估任务。作业可能运行两小时，工作进程可能重启；开发者会同时修改数据与代码。设计平台，确保中断可恢复、重复提交不会重复付费训练、评估可复核，且 Agent 不能自行将模型发布到生产。人数和时长均为练习假设。",
+    "clarify": [
+      "恢复目标是继续计算到最近 checkpoint，还是重新执行完整步骤？前者要求训练代码支持 checkpoint，工作流状态持久化本身不能提供计算级恢复。",
+      "实验需要完全逐位可复现，还是指标在允许误差内可复现？GPU 非确定性可能使前者成本很高，目标决定是否强制确定性算子与硬件版本。",
+      "谁批准数据访问、GPU 预算和模型发布？明确租户权限及预算边界后，才能决定哪些步骤自动执行、哪些必须由有权限的人确认。"
+    ],
+    "concepts": [
+      {
+        "term": "Experiment manifest · 实验清单",
+        "explanation": "给一次实验写明输入身份：代码 commit、特征版本、数据快照、镜像 digest、参数、随机种子、评估集版本。它相当于可审计的构建清单，不能用会变化的 latest 代替。"
+      },
+      {
+        "term": "Artifact lineage · 产物血缘",
+        "explanation": "记录某个模型由哪些数据和实验生成，又被哪些评估和发布引用。出现错误标签时，可以据此找到受影响模型，而不是只知道一个文件地址。"
+      },
+      {
+        "term": "Idempotency key · 幂等键",
+        "explanation": "对同一次被接受的提交使用稳定标识。调用方超时重试时，平台返回已创建作业的状态，而不是再创建一个昂贵的训练作业。"
+      }
+    ],
+    "tests": [
+      "能否把工作流恢复和训练 checkpoint 恢复分开解释，并指出需要分别保存什么状态。",
+      "能否定义实验可比较的输入契约，发现仅保存 prompt 或模型文件不足以复现实验。",
+      "能否为 Agent 的工具执行设置最小权限、预算和可验证的质量门槛，而不是只依赖自然语言要求。"
+    ],
+    "shortAnswer": "我会把平台拆成控制面和执行面。控制面保存不可变实验清单、步骤状态和产物血缘，提交使用幂等键；执行面按租户配额运行隔离作业，训练 checkpoint 写到持久存储。恢复时先核对已提交的产物，避免把超时当作任务失败而重复训练。评估必须固定数据集和指标版本，同时检查关键切片与成本；通过评估只代表候选模型合格，生产发布仍由独立权限控制。Agent 可以提出修改和启动被授权的实验，但预算、数据访问和发布都由平台规则约束。",
+    "deepAnswer": [
+      {
+        "title": "让实验身份稳定",
+        "body": "接收请求时解析可变引用，把分支名、镜像 tag 和数据分区选择解析成具体版本，生成不可变 manifest。独立的 submission_id 解决用户重试，manifest hash 用于识别相同输入；两者不能混为一谈，因为用户可能有意以相同参数再跑一次来估计方差。记录数据获取时间和许可范围，避免工作进程恢复后读取了另一份数据。"
+      },
+      {
+        "title": "把状态转移与产物提交做可靠",
+        "body": "步骤状态至少包含待运行、运行中、成功、失败和取消。worker 用租约领取任务，心跳过期后允许接管；产物先写临时位置，校验完整性后原子地登记成功引用。若模型已上传而状态更新超时，恢复程序先核对输出和作业身份，再决定重试。训练框架 checkpoint 负责参数、优化器和数据游标等计算状态，调度器只保存步骤状态并不能恢复这些内容。"
+      },
+      {
+        "title": "把评估证据做成发布输入",
+        "body": "固定评估数据版本、特征处理和指标实现，记录全量指标以及新用户、稀疏商家等关键切片。指标提升还要检查样本量、泄漏、推理延迟和资源成本；Agent 自己写的测试不能成为唯一证据。保留基线模型、配对评估结果和失败样例，评估完成后生成可审查报告。训练产物可以自动注册为 candidate，切换生产别名则需要独立的发布门槛。"
+      },
+      {
+        "title": "用基础设施权限限制失控行为",
+        "body": "按租户设置并发、GPU 小时和单次任务时长上限，工具调用使用任务范围的短期身份。运行环境只读访问允许的数据，写入仅限实验目录；发布令牌不下发给训练 worker。取消操作要传播到真实作业，不能只修改 UI 状态。成本同时记录已消费和已预约额度，避免十个并发任务分别通过余额检查后共同超支。"
+      }
+    ],
+    "architecture": "开发者 / Agent\n  ↓ 提交 manifest + submission_id\n实验 API → 状态库 + 配额预留\n  ↓\n调度器 → 隔离训练 worker → checkpoint / 模型存储\n  ↓\n固定评估集 → 评估报告 → 模型 registry\n  ↓ 受控发布门槛\n生产版本别名 / 回滚记录",
+    "calculation": {
+      "problem": "练习假设：团队当天剩余预算 40 GPU·小时；每个实验申请 2 张 GPU，预估最多运行 3 小时。10 个请求同时到达。",
+      "steps": [
+        "每个作业需要预约 2 × 3 = 6 GPU·小时；预约与余额扣减必须在同一个一致性边界内完成。",
+        "最多可同时接受 floor(40 ÷ 6) = 6 个申请，预约 36 GPU·小时，剩余 4 GPU·小时；其余排队或要求缩小任务。",
+        "某作业两小时完成后，实际消耗为 4 GPU·小时，释放未消费的 2 GPU·小时。若允许超过三小时运行，超时前必须申请新增额度。"
+      ],
+      "conclusion": "这是预算账本示例，不是训练运行时间预测。预估有误不能通过无限续跑掩盖，应有续租或终止策略。"
+    },
+    "followups": [
+      {
+        "question": "Agent 说训练已经成功，但平台调用超时了，该不该立即再提交？",
+        "answer": "先查询稳定 submission_id 对应的作业和产物状态，不能把客户端超时等同于服务器没有执行。若作业仍运行，返回其状态；若产物已写入但状态未提交，验证产物完整性和 manifest 身份后补交状态。只有确认前一次未创建或已失败且可安全重试时才新执行。外部训练服务也要提供请求幂等键或可查询的作业标签，否则必须承认存在重复执行风险并设置对账流程。",
+        "signal": "超时歧义、幂等边界和昂贵作业重复执行"
+      },
+      {
+        "question": "同样的 manifest 为什么仍跑出不同模型？",
+        "answer": "随机种子不覆盖所有非确定性。GPU kernel、分布式归约顺序、数据读取并发和库版本都可能改变浮点结果。先定义允许的再现目标：能复核同一实验输入并在置信范围内得到相近指标，还是逐位一致。前者保留环境和多次试验方差；后者还要限定硬件、确定性算子和执行顺序，可能牺牲吞吐。不要为追求不必要的逐位一致而让平台无法使用。",
+        "signal": "可复现性目标与性能成本之间的取舍"
+      },
+      {
+        "question": "开发者在一个实验中同时改了数据、代码和评估集，怎么判断提升来自哪里？",
+        "answer": "平台应展示 manifest 差异并阻止把不同评估集上的分数直接比较。先选定共同、冻结的评估协议，再用受控实验分别改变一个因素，或做有设计的消融实验。历史结果可以保留，但应标记不可直接比较。尤其不能让 Agent 为了提高分数不断改测试集；隐藏留出集和人工检查的失败切片能提供独立约束，平台要保存这些证据及其版本。",
+        "signal": "实验有效性与评估集污染"
+      },
+      {
+        "question": "为什么不直接让 Agent 拥有发布权限，加快开发？",
+        "answer": "训练评估和生产发布的风险、身份范围不同。即使 Agent 能合法提交实验，也可能误读结果或受到仓库内容的误导；给它常驻生产密钥扩大了故障范围。可以自动化低风险步骤，例如候选注册、沙箱验证和受限 shadow 流量，但生产切换应由独立发布服务核验签名产物、通过的报告、版本兼容和批准状态。这样能缩短等待时间，同时保留可追责的发布边界。",
+        "signal": "最小权限与自动化发布门槛"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "保存聊天记录就能恢复实验。",
+        "fix": "聊天记录不能替代状态机、输入版本和训练 checkpoint；恢复必须核对外部作业与产物。"
+      },
+      {
+        "mistake": "模型评估分数最高就自动上线。",
+        "fix": "先确认可比数据、成熟标签和切片表现，再检查延迟、成本、兼容与独立发布权限。"
+      },
+      {
+        "mistake": "只在任务结束后统计费用。",
+        "fix": "长任务需要额度预约、运行中计量和超时机制，否则并发实验可以同时超支。"
+      }
+    ],
+    "bridge": "可以把已有的分布式任务调度、租约、幂等和 Kubernetes 隔离经验直接迁移到控制面。新增的 ML 重点是实验身份不仅包含代码，还包含数据、特征、评估协议和计算环境；成功执行不等于模型质量提高。回答时可以用自己真实做过的任务重试或资源隔离案例说明可靠性，再明确补上这些 ML 特有约束。",
+    "english": "I would separate durable workflow state from training checkpoints. Every experiment would record immutable versions of its code, data, features, environment, and evaluation protocol. Submission retries would reuse an idempotency key, and workers would run within reserved quotas. A successful evaluation would register a candidate model; production promotion would remain a separate, controlled operation.",
+    "exercise": {
+      "task": "用纸或一个 JSON 文件设计实验状态机，演练 worker 在模型上传后、成功状态提交前崩溃的恢复流程，并计算预算示例。",
+      "deliverable": "一份含 manifest、步骤状态、submission_id、产物引用和预算账本的样例，以及六步恢复说明。",
+      "checks": [
+        "同一 submission_id 连续提交两次只对应一个训练作业。",
+        "恢复说明先查询和校验已有产物，没有直接重复训练。",
+        "40 GPU·小时预算最多接受六个各预约 6 GPU·小时的任务，且发布凭据不在 worker 配置中。"
+      ]
+    },
+    "rubric": [
+      "能明确区分步骤状态和训练 checkpoint。",
+      "清单至少固定代码、数据、特征、环境与评估版本。",
+      "能解释上传成功但状态失败时如何恢复。",
+      "给出并发预算预留与取消传播方案。",
+      "生产发布与实验执行使用不同权限边界。"
+    ]
+  },
+  "official-dqr": {
+    "title": "离线数据检查全绿，为什么上线后模型仍然变差？",
+    "minutes": 45,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "已读的 DataQualityReport README 把目标描述为快速提醒用户 Pandas DataFrame 中潜在的数据质量问题，强调诊断运行时间与阅读报告的注意力成本，并把一分钟以内作为诊断速度目标。这类工具适合在交互分析中频繁使用：先发现明显的数据异常，再决定是否值得继续训练。这个速度目标不是对任意数据规模的运行时保证。",
+      "自编面试题进一步问：检查一份表与保护持续运行的模型服务有什么区别？表里每列都有值，不代表值足够新；分布变化也不直接证明模型变坏。生产环境需要把数据契约、特征 freshness、训练服务一致性、成熟标签下的模型效果以及用户结果分层观测，并让每一种告警对应可执行的诊断动作。"
+    ],
+    "prompt": "自编演练：一个模型的新版本离线数据报告正常，上线两小时后转化下降。模型服务错误率和平均延迟正常，部分城市的实时特征超过 30 分钟未更新。如何定位、止损并补齐监控？30 分钟和两小时是练习假设。",
+    "clarify": [
+      "转化下降来自随机实验还是发布前后对比？如果没有对照，先排除时间、城市流量与促销变化，避免把相关性当因果。",
+      "线上使用的是哪个特征版本、缺失默认值和模型版本？这些标识决定能否把问题与发布、物化作业或数据源关联。",
+      "效果标签多久成熟，延迟特征是否被训练时模拟过？标签未成熟时不能用不完整转化率下结论，但可以基于已违反 freshness 契约先采取安全回退。"
+    ],
+    "concepts": [
+      {
+        "term": "Data quality · 数据质量",
+        "explanation": "检查值是否符合输入契约，例如字段类型、取值范围、重复率和空值率。它回答数据能否被正确解释，不直接回答模型预测是否准确。"
+      },
+      {
+        "term": "Feature freshness · 特征新鲜度",
+        "explanation": "观察预测时刻与特征更新或事件覆盖进度之间的差距。Redis key 存在且 TTL 未过期，不代表里面已经纳入最近的业务事件。"
+      },
+      {
+        "term": "Label maturity · 标签成熟度",
+        "explanation": "一次预测的结果需要时间才能确认。例如某次曝光是否最终下单，必须等观察窗口结束。过早把未发生的结果都算负例，会把标签延迟误当质量下降。"
+      },
+      {
+        "term": "Training-serving skew · 训练与服务偏差",
+        "explanation": "训练与推理看到的输入含义、变换、缺失处理或时间可用性不同。即使字段名字相同，离线拿到补齐后的值、线上只能拿到延迟值，也会产生偏差。"
+      }
+    ],
+    "tests": [
+      "是否能把服务健康、输入健康、预测分布、成熟标签效果分层，而不是只看 CPU 和错误率。",
+      "是否能设计按版本、城市和 freshness 切片的诊断，避免全局均值掩盖局部故障。",
+      "是否能在标签未成熟时做有证据的止损，并保留后续评估，避免自动重训扩大事故。"
+    ],
+    "shortAnswer": "我会先按城市、模型版本和特征版本切片，确认下降是否集中在 freshness 违约的请求。服务返回成功不代表输入有效，要把请求关联到特征生成时间、数据流进度、缺失标记和 fallback 状态。先对异常城市切换到经过验证的旧版本或保守策略，并检查旧版本是否也依赖同一条坏数据链路。随后查 Kafka lag、Flink watermark、物化失败与 schema 变更，用线上特征日志回放比对离线结果。模型质量要等标签成熟后再评价，数据漂移告警只用于触发诊断，不直接触发重训。",
+    "deepAnswer": [
+      {
+        "title": "先建立能关联的观测维度",
+        "body": "在预测日志中记录 request_id、模型版本、特征集合版本、取值时间和回退原因；不必无差别记录所有敏感原始值，可以做抽样、聚合和访问控制。把 fresh、stale、missing 分开统计，按城市与版本切片。错误率正常只能说明 RPC 成功，不能说明模型收到了有效特征；同样，全局平均 freshness 可能掩盖一个城市整条流停滞。"
+      },
+      {
+        "title": "沿数据链定位，而不是直接重训",
+        "body": "检查事件入口量、Kafka 分区 lag、事件时间进度、Flink checkpoint 与 sink 写入失败，区分上游没产生事件、消费积压和计算正常但物化失败。对抽样请求重建当时线上可见输入，与离线同版本变换对比。若某字段更新中断但 key 不过期，修 TTL 不能解释整个故障，应先找出 freshness 时间戳是否随真实计算推进。"
+      },
+      {
+        "title": "止损要针对依赖关系",
+        "body": "降级可以选择不依赖异常实时特征的基线模型、经过验证的缺失值策略或业务保守规则。单纯回滚模型不一定有效，因为新旧模型可能共享同一坏特征源；无限重试只会放大故障。策略应限定异常切片，统计 fallback 率与用户结果，恢复时小流量验证，再逐步解除。默认零值只有在训练和评估覆盖该语义时才是合理选择。"
+      },
+      {
+        "title": "把长期门槛拆成四层",
+        "body": "开发阶段做 DataFrame schema、缺失与范围检查；发布阶段验证特征 schema、版本兼容和线上回放；运行阶段连续监测事件延迟、freshness、预测分布与 slice 覆盖；效果阶段等标签成熟后计算模型指标和实验指标。漂移距离需要按特征类型与稳定窗口校准，不是所有分布变化都有害。每条告警应标明 owner、受影响模型、诊断链接和可执行回退步骤。"
+      }
+    ],
+    "architecture": "事件 → Kafka / Flink → 特征物化 → 推理\n           ↓ lag / watermark      ↓ 版本 / freshness\n训练样本 → 表质量检查       请求日志 + 预测日志\n           ↓                       ↓\n     固定回放样例             成熟标签 join\n           └────── 诊断与切片评估 ──────┘\n                        ↓\n              定向 fallback / 修复 / 验证恢复",
+    "calculation": {
+      "problem": "练习假设：城市 A 占请求量 10%，其中 stale 特征比例 60%；其余城市占 90%，stale 比例 1%。全局告警阈值设为 10%。",
+      "steps": [
+        "全局 stale 率 = 10% × 60% + 90% × 1% = 6.9%，低于阈值，告警不会触发。",
+        "城市 A 的 stale 率为 60%，已明显违反该切片的输入契约；按城市切片能暴露被全局平均掩盖的问题。",
+        "若某转化标签需要 24 小时成熟，发布两小时后的未完成事件不能直接全部计作负例；应使用已成熟 cohort 或短期代理指标。"
+      ],
+      "conclusion": "切片阈值应结合请求量与业务重要性设定，不能对每个小样本组合都创建同等敏感的告警。6.9% 的计算本身不证明转化下降的因果关系。"
+    },
+    "followups": [
+      {
+        "question": "特征分布明显变化，但业务指标没变，需要立刻回滚吗？",
+        "answer": "不应仅凭漂移距离回滚。先检查变化是否来自真实业务，例如新城市上线或节假日，再看变化是否落在模型敏感特征、是否超出训练覆盖、是否伴随缺失或 schema 错误。对流量充分且标签成熟的切片评估效果，短期可扩大抽样和验证。若输入违反明确契约，即使业务指标尚未变化也可以止损；若契约有效且效果稳定，记录变化并评估是否需要更新基线。",
+        "signal": "数据漂移与模型质量变化的区别"
+      },
+      {
+        "question": "不记录全部特征值，怎样定位 training-serving skew？",
+        "answer": "可对受控样本记录特征版本、计算时间、缺失掩码及必要的脱敏值，结合不可变原始事件和变换版本进行回放。比较要按特征逐项进行，并区分浮点容差、默认值、时间可用性和真正语义差异。聚合哈希可以先发现不一致，但不能替代诊断样本；也不能从今天的 Redis 最新值反推出过去请求看到的值。抽样率和保留时间应兼顾定位能力、成本与数据权限。",
+        "signal": "可观测性成本与可复现证据"
+      },
+      {
+        "question": "为什么用默认值填好缺失数据后，DataFrame 报告通过了却更危险？",
+        "answer": "填充会消除表面空值，但可能隐藏上游故障，并把“未知”错误解释成业务上的零。例如未知的过去五分钟订单数不等于确实没有订单。应在填充前保留缺失原因和比例，必要时使用单独缺失指示特征，并确保训练包含相同策略。超过契约范围时走明确 fallback 而不是继续静默填充。质量报告应同时检查原始缺失与处理后分布，不能只检查最终矩阵没有 NaN。",
+        "signal": "缺失语义与静默数据腐坏"
+      },
+      {
+        "question": "模型回滚之后效果还是差，该怎么继续？",
+        "answer": "首先验证流量是否真的切回旧模型，以及模型缓存、路由和版本标签是否一致；然后查看新旧模型是否共享故障特征、召回候选或下游业务规则。若共享依赖仍坏，回滚模型参数不会改善。可用相同请求分别运行基线和受影响模型，并冻结输入比较，区分模型变更与输入变更。修复后保留受影响样本做回归案例，同时等待成熟标签确认恢复，而不是只看服务错误率下降。",
+        "signal": "依赖故障定位与回滚有效性"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "监控 CPU、QPS 和 HTTP 200 就足够。",
+        "fix": "这些只覆盖系统健康，还需要输入 freshness、缺失语义、版本和成熟标签效果。"
+      },
+      {
+        "mistake": "PSI 或其他漂移指标超过阈值就自动重训。",
+        "fix": "先判断业务变化、数据损坏和效果影响；坏数据上自动重训会固化故障。"
+      },
+      {
+        "mistake": "空值补成零后就没有数据质量问题。",
+        "fix": "保留缺失标记、原因和填充前统计，验证训练服务使用相同且合理的缺失策略。"
+      }
+    ],
+    "bridge": "可以从已有的 Kafka lag、Flink watermark、链路追踪和按租户排障经验切入。ML 新增的是一次请求“成功”之后仍需追踪输入语义和未来标签：SLO 正常与预测正确是两件事，且模型效果经常不能立即确认。",
+    "english": "A healthy RPC does not guarantee a healthy prediction. I would correlate each request with model and feature versions, freshness, and fallback status, then inspect the affected slices. I would mitigate a confirmed data-contract violation before retraining. Model quality would be evaluated on mature labels, while drift would be treated as a diagnostic signal rather than proof of degradation.",
+    "exercise": {
+      "task": "画出四层监控表，并用给定两城市数据手算全局与切片 stale 率，写一个最小事故处置方案。",
+      "deliverable": "包含监控信号、维度、owner、动作的表格，以及回退与恢复的五步说明。",
+      "checks": [
+        "全局 stale 率正确算出 6.9%，同时指出城市 A 的 60% 异常。",
+        "至少区分服务健康、输入契约、预测分布、成熟标签效果四层。",
+        "处置方案检查旧模型是否共享坏特征，不把漂移直接等同于重训命令。"
+      ]
+    },
+    "rubric": [
+      "明确区分输入质量、预测分布和模型效果。",
+      "能通过版本与城市切片找到局部异常。",
+      "解释标签成熟和观察窗口的影响。",
+      "提供可执行的降级与恢复条件。",
+      "给出避免静默默认值掩盖故障的措施。"
+    ]
+  },
+  "nvidia-batching": {
+    "title": "Dynamic batching 开了，为什么吞吐变高而 p99 更差？",
+    "minutes": 45,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "Triton 的动态批处理把多个请求中的样本合到一次模型执行中，目的是摊薄固定开销并提高设备吞吐。公开文档将它用于无状态模型；需要保持序列状态的请求则有 sequence batching 等不同机制。默认动态批处理会尽量使用当时可组成的批次，但不为了凑批额外等待。",
+      "max_queue_delay_microseconds 表达的是为组成批次允许增加的等待，不是整个请求的完成期限，更不是“排队一定小于这个值”。当所有 model instance 都忙时，请求仍可能排很久。文档也建议多数模型不要机械填写 preferred_batch_size，而是先测默认配置，只有某些批大小有明确性能收益时再指定。下面把这些概念放进延迟故障场景。"
+    ],
+    "prompt": "练习假设：GPU 推荐模型原来每请求单个样本，动态 batching 从 1 改到 max_batch_size=16、max_queue_delay=5ms 后吞吐提升，但高峰队列等待到 80ms，端到端 p99 超过 100ms。请解释原因、定位方法和配置选择。",
+    "clarify": [
+      "100ms 是业务端到端 SLO 还是 Triton RPC 时间？需要给特征、网络、序列化留下预算。",
+      "请求样本数、tensor shape 与到达分布是什么？不同 shape 未必能直接合批，平均 QPS 不能代表突发。",
+      "模型 batch 大小与执行时间曲线、instance 数、显存余量是什么？没有实测曲线就无法证明 batch 16 最优。"
+    ],
+    "concepts": [
+      {
+        "term": "Request / sample / execution · 请求、样本与执行",
+        "explanation": "一个 HTTP/gRPC 请求可以包含多个样本，一次 backend execution 又可能合并多个请求。因此 requests/s、items/s 与 executions/s 是三个不同口径。"
+      },
+      {
+        "term": "Dynamic batching · 动态批处理",
+        "explanation": "在短时间内把形状兼容、语义独立的样本合并执行。收益来自固定开销摊薄与设备并行，代价是等待和更大的单次工作量。"
+      },
+      {
+        "term": "Queue delay vs deadline · 凑批等待与截止时间",
+        "explanation": "凑批等待是调度策略的一部分；deadline 是业务允许的最晚完成时间，包含网络、队列和执行，二者不能互相替代。"
+      }
+    ],
+    "tests": [
+      "能解释高吞吐与低尾延迟之间的真实取舍，并识别低负载与过载两种不同排队。",
+      "能根据 batch/shape/instance 实测曲线做选择，而不是背 preferred_batch_size 模板。",
+      "能把调参和 admission、超时、隔离、扩容连起来，避免仅优化 GPU 利用率。"
+    ],
+    "shortAnswer": "我先把等待拆成凑批等待和实例忙导致的资源排队。5ms 只限制前者，所以系统到达率超过服务能力时仍可能等 80ms。我会记录每次执行的 batch 大小、shape、排队时间和设备执行时间，先测无额外等待的 baseline，再在业务剩余延迟预算内增加 delay。batch 越大不一定越好，它可能占用更多显存、拉长执行和头部阻塞。最终配置按代表性流量下的成功吞吐与端到端 p99 选择，同时限制队列和 in-flight、传播 deadline，对过载实施扩容或降级。",
+    "deepAnswer": [
+      {
+        "title": "从两类等待重建故障",
+        "body": "低负载时，实例空闲却在等其他请求，这属于主动凑批；负载高时，实例正在跑上一批，新请求只能等资源。将这两种等待与实际执行分开，再看输入 shape 是否导致多个无法合并的小队列。max_queue_delay 不能修复长期到达率超过容量；把 delay 调到零可能减少主动等待，但仍须处理资源不足。"
+      },
+      {
+        "title": "先做最小基线，再逐维调参",
+        "body": "先确认模型本身支持 batch 维度，以默认动态 batching 测 batch 分布、吞吐、p50/p95/p99 与显存。逐步探索 max_batch_size、可允许的凑批 delay、instance_group 数目和输入 shape，保持负载种子与请求分布一致。preferred_batch_size 只在某些大小有测得的性能跃迁时使用，例如对应的 TensorRT optimization profile；不要因为看起来规整就填写一串 2 的幂。"
+      },
+      {
+        "title": "把排队预算连接到 admission",
+        "body": "业务 deadline 在网关进入时确定，后续按剩余时间传播。入队前评估剩余预算，设置队列大小和超时策略，过期请求尽量在执行前移除。已经提交的 GPU kernel 可能无法即时中断，因此不能把客户端取消等同于资源立刻释放。限流与公平调度保护重要租户，防止一个大 batch 或高频租户占满所有槽位。"
+      },
+      {
+        "title": "用真实混合负载判断可用配置",
+        "body": "除稳态 QPS 外测试低负载、饭点突发、长短 shape 混合和部分实例故障。记录每千次按时成功预测的成本，而不只看设备利用率或单批最大吞吐。端到端延迟包含特征、传输与前后处理，给各段设预算可以指导设计，但最终 p99 必须从完整请求分布测量，不能由分段 p99 直接相加推导。"
+      },
+      {
+        "title": "明确哪些请求不能直接混合",
+        "body": "状态相关请求需要顺序与状态归属，不能当作独立样本随意分到不同实例。shape 不兼容时可按尺寸分桶，某些模型允许 padding 或特定 ragged batching，但必须验证后端语义与额外计算成本。对 LLM，prefill/decode 的运行特征和 continuous batching 又不同，不能把普通无状态 Triton 批处理规则原封不动套用。"
+      }
+    ],
+    "architecture": "业务请求 → deadline / admission\n           ↓\n     按模型版本与 shape 分组\n           ↓\n   有界队列 → 动态 batcher\n           ↓\n   可用 model instance → GPU\n           ↓\n      拆分结果并返回",
+    "calculation": {
+      "problem": "练习假设：单个模型实例 batch 1 执行 4ms，batch 8 执行 10ms，batch 16 执行 18ms；忽略传输与调度，仅比较饱和执行吞吐。",
+      "steps": [
+        "batch 1：1 / 0.004 = 250 items/s。",
+        "batch 8：8 / 0.010 = 800 items/s；batch 16：16 / 0.018 ≈ 889 items/s。",
+        "batch 16 相对 batch 8 吞吐只增加约 11.1%，单次执行却从 10ms 到 18ms。"
+      ],
+      "conclusion": "这些是设备执行的理想上限，不包含凑批和排队；如果延迟预算紧或流量不足，batch 8 可能更合适，必须测完整分布。"
+    },
+    "followups": [
+      {
+        "question": "既然 batch 16 吞吐最高，为什么不永远用 16？",
+        "answer": "达到 batch 16 需要足够且形状兼容的样本。低负载下为了凑满而等待会显著增加延迟，混合 shape 也会稀释有效到达率。更大的 batch 还可能接近显存上限或造成长执行阻塞。应比较每种配置在实际请求分布下按时完成的 items/s，并允许调度器运行未满批，而不是把“最大 batch”误当成每次必须凑到的大小。",
+        "signal": "吞吐上限与线上有效吞吐的区别。"
+      },
+      {
+        "question": "所有输入都经过 padding，为什么 p99 仍然很差？",
+        "answer": "padding 解决形状可合并问题，却可能让短请求跟着最长输入一起付出计算成本。先看真实长度分布、padding 比例和单批最长样本，用长度分桶减少浪费，但分桶太细又会降低每桶到达率并增加等待。需要在等待、浪费、实例利用率之间实测取舍；若有高优先级短请求，还要考虑独立池或有界的公平调度。",
+        "signal": "头部阻塞与 shape 分组的二阶效应。"
+      },
+      {
+        "question": "为什么增加 model instance 数反而 OOM 或变慢？",
+        "answer": "每个实例可能有自己的模型状态、workspace 和运行开销，增加并发不等于免费复制计算能力。多个实例会争显存带宽和设备执行资源，产生更高尾延迟，显存峰值也可能超限。先测单实例容量，再逐步增加实例并记录峰值显存、实际 batch、execution 时间和端到端分布；如果已经受设备瓶颈限制，应增加设备或隔离模型，而不是继续堆实例。",
+        "signal": "并发、资源复制与物理瓶颈。"
+      },
+      {
+        "question": "小流量租户等不满批，大租户把队列占满，怎么公平？",
+        "answer": "先确定隔离目标：是每租户延迟、吞吐保底还是费用上限。入口限制租户 in-flight 与排队数，调度时采用有界优先级或按权重分配批次机会，避免一组请求无限饿死。对极小流量租户可以不等待满批，或与兼容模型和 shape 的请求安全合批；不能仅按租户拆出大量稀疏队列而不测其延迟成本。",
+        "signal": "多租户调度与利用率之间的权衡。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“max_queue_delay=5ms，所以任何请求最多排队 5ms。”",
+        "fix": "区分凑批等待和资源队列；用 deadline、有界队列与容量控制治理后者。"
+      },
+      {
+        "mistake": "“preferred_batch_size 总要写 [8,16,32]。”",
+        "fix": "先测默认调度；只有特定大小有实际性能收益才指定，且不能超过模型支持范围。"
+      },
+      {
+        "mistake": "“dynamic batching 也能随意打乱有状态会话。”",
+        "fix": "有状态模型必须保持序列状态与实例关联，使用适合该后端的序列调度策略。"
+      }
+    ],
+    "bridge": "你熟悉 Kafka 的批量发送与 Flink 的吞吐/延迟取舍，可以用“摊薄固定成本但增加等待”作切入。新的部分是 tensor shape、GPU 显存、模型是否支持 batch 维度，以及请求数和样本数不同；不要把模型推理当作任意字节记录拼接。",
+    "english": "I would distinguish intentional batch formation delay from queueing behind busy instances. A five-millisecond batch delay is not an end-to-end deadline. I would benchmark batch size, input shapes, and instance count under representative bursty traffic, then choose the configuration that maximizes throughput within the latency SLO. Admission control and bounded queues are still necessary when arrival rate exceeds service capacity.",
+    "exercise": {
+      "task": "用 25 分钟为 batch 1/8/16 写一张实验表，包含低负载、稳态和两倍突发三种流量；可以先用站内批处理实验验证直觉。",
+      "deliverable": "吞吐计算表、每次实验要采集的五个指标，以及一段“5ms 为什么能排 80ms”的口述解释。",
+      "checks": [
+        "理想执行吞吐分别约为 250、800、889 items/s，单位没有写成 requests/s。",
+        "明确至少采集 batch 分布、queue、execution、端到端 p99、拒绝率。",
+        "给出队列上限或 deadline 策略，而不只修改 batch 配置。"
+      ]
+    },
+    "rubric": [
+      "能准确拆分两类等待。",
+      "正确计算样本吞吐且说明测量边界。",
+      "解释 shape、状态和 instance 的约束。",
+      "给出过载时的具体拒绝或降级策略。",
+      "按端到端 SLO 选配置，而不是只追最大 batch。"
+    ]
+  },
+  "nvidia-model-config": {
+    "title": "模型容器已健康，为什么发布后第一批预测仍超时？",
+    "minutes": 50,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "Triton 配置需要描述模型输入和输出的名称、类型与维度，服务器无法靠一行配置把一个不支持 batch 的模型自动变成可 batch 的模型。公开文档要求 batching 维度满足模型本身的约束；max_batch_size=0 表示没有该自动 batch 维度。对支持 batch 的模型，配置中的 dims 与实际请求张量的 batch 维度也要正确区分。",
+      "文档还描述了 model warm-up：配置的预热请求成功完成后，相应模型实例才开始服务。这比“容器端口能连通”更接近推理可用，但只覆盖你实际提供的预热输入。下方演练把模型合约、registry、发布 gate、canary 和回滚连起来；这些发布建议是自编参考设计，不是对 DoorDash 当前平台的陈述。"
+    ],
+    "prompt": "练习假设：把 ONNX 推荐模型 v12 发布到 Triton，容器 liveness 通过，第一批线上请求却超时或报 shape mismatch，旧模型 v11 仍可用。设计一个发布流程，防止不兼容制品和冷启动直接影响主流量。",
+    "clarify": [
+      "模型导出的 input/output 名称、dtype、shape 和动态轴是什么？要区分模型签名变更与客户端请求变更。",
+      "模型需要哪个 backend/runtime 与设备能力？同样是模型文件，不代表任意 runtime 或 GPU 架构都能加载。",
+      "流量是否包含长序列、大 batch 或可选特征？golden case 与 warm-up 必须覆盖有代表性的形状，不能只测一个最小样本。"
+    ],
+    "concepts": [
+      {
+        "term": "Model contract · 模型输入输出合约",
+        "explanation": "把特征名称、次序、类型、shape、默认值和输出含义写成机器可验证的接口；返回一个 float 不代表语义与旧版本相同。"
+      },
+      {
+        "term": "Model registry · 模型登记与版本追踪",
+        "explanation": "登记不可变制品摘要、训练与特征版本、评估证据和部署状态；它决定发布什么，而服务运行时负责怎样加载和执行。"
+      },
+      {
+        "term": "Liveness / readiness / warm-up · 存活、就绪与预热",
+        "explanation": "存活表示进程需要不需要重启；就绪表示可以接流量；预热通过代表性执行把懒初始化与首次分配提前做掉。三者不是一个健康检查。"
+      }
+    ],
+    "tests": [
+      "能把 ML 模型当作有语义和版本依赖的制品，而不只是一个 Docker 镜像。",
+      "能设计功能与性能两类发布门槛，解释 warm-up 的覆盖边界。",
+      "能给出可执行的流量路由和兼容性回滚，而不是只说蓝绿发布。"
+    ],
+    "shortAnswer": "我会先阻止 v12 接主流量，把进程健康与模型就绪分开。发布 manifest 绑定模型摘要、backend、输入输出 schema、特征版本和配置；CI 用 golden cases 校验 shape、dtype 与数值容差，再在目标硬件跑代表性 warm-up 和容量测试。只有模型真正 ready 才进入小比例 canary，监控错误、尾延迟、fallback 和成熟质量信号。v11 保留温热容量，回滚时切换整个兼容版本组合，而不是只换权重文件。对新增特征先保证可读与默认值语义，避免新模型与旧数据合约混用。",
+    "deepAnswer": [
+      {
+        "title": "把制品身份和输入合约固定下来",
+        "body": "registry 记录不可变 artifact digest、模型版本、训练代码/数据引用、特征定义版本、runtime/backend 版本与目标设备要求。签名校验检查名称、dtype、shape 与输出解释，golden requests 覆盖零值、缺失、边界长度和常见输入。若模型本身没有 batch 维度，就用 max_batch_size=0；不能仅调服务配置期待模型图自动改变。"
+      },
+      {
+        "title": "在接流量前完成真实推理验证",
+        "body": "先下载并校验摘要，再加载模型；readiness 要能反映所需模型版本已加载，而非仅 HTTP 端口活着。代表性 warm-up 包含实际会出现的 batch 和 shape，检查资源峰值与耗时。warm-up 可能触发显存分配、内核选择或后端初始化，但它不等于完整性能测试；未覆盖的大 shape 仍可能首次分配、报错或 OOM。"
+      },
+      {
+        "title": "区分 shadow 与 canary 的证据",
+        "body": "shadow 复制请求到新模型但不影响业务返回，用于检查功能、分布与成本；应限制影子流量，避免抢占主模型资源。canary 让受控比例真实用户使用新版本，按稳定分桶路由并记录 model/feature/config version。错误和时延可以快速判断，业务质量或标签延迟的指标需要等待成熟样本，不能运行五分钟就宣称质量提升。"
+      },
+      {
+        "title": "给回滚留下实际可用的容量",
+        "body": "保留旧版本温热实例和兼容输入管道，回滚按 manifest 切换路由，必要时同时恢复预处理或特征 schema。旧版本如果已经卸载，回滚仍会遇到下载、加载和 warm-up 的空窗。滚动升级的 maxSurge、显存峰值和节点容量要提前验证，避免新旧模型共存时把同一 GPU 撑爆。"
+      },
+      {
+        "title": "用故障注入检验发布 gate",
+        "body": "故意发布错误 dtype、错误 shape、损坏 artifact、缺失特征和极大输入，确认它们在接主流量前被阻止。再模拟加载时间过长、canary 超时和质量回归，验证自动停止扩量与明确的人工调查入口。每次预测日志保留版本与必要诊断上下文；不把原始敏感特征任意打进日志。"
+      }
+    ],
+    "architecture": "训练与评估 → 不可变制品 / registry\n                 ↓\n  manifest：模型 + schema + 特征 + runtime\n                 ↓\n 合约测试 → 加载 → warm-up → model ready\n                 ↓\n       shadow → canary → 扩量\n                 ↘ 失败：路由回旧温热版本",
+    "calculation": {
+      "problem": "练习假设：流量 1200 requests/s，旧副本可承载 200 requests/s，新模型计划先接 5%；新版本从下载到 warm-up 完成需 75 秒。",
+      "steps": [
+        "canary 的目标流量 = 1200 × 0.05 = 60 requests/s，必须落在已验证的新版本容量内。",
+        "在最初 75 秒，新模型有效容量为 0，不能提前把主流量 5% 切过去。",
+        "若要随时完全回滚，旧版本仍需承担完整 1200 requests/s 的能力；至少 6 个副本只是无余量的理论下限。"
+      ],
+      "conclusion": "5% 是流量比例而非安全保证；shape、用户分桶、指标成熟度与容量余量决定 canary 是否有足够证据。"
+    },
+    "followups": [
+      {
+        "question": "模型 ready 已通过，为什么还需要 golden case？",
+        "answer": "ready 主要说明模型已经加载并能按就绪规则接流量，不证明特征顺序、单位或输出含义与业务一致。两个输入同为 float32、shape 都是 [32]，把公里当成米也可能正常执行。golden case 用固定输入和期望输出或容差验证语义，并覆盖预处理、默认值与后处理。它应和版本化合约一起运行，不能只比较 HTTP 状态码。",
+        "signal": "可执行性与语义正确性的区别。"
+      },
+      {
+        "question": "模型输出正常但 canary 延迟变差，先回滚还是调参？",
+        "answer": "先按事前约定的用户 SLO 与错误预算处理，明显伤害用户就停止扩量或回滚，保留新版本诊断流量。再比较特征请求、shape、batch、设备执行和内存分配，确认是模型成本变化还是配置不当。不能边接全量边无边界调参，也不应为了得到更好指标随意改变实验人群；修复后的版本需要重新走对应性能验证。",
+        "signal": "发布安全与可归因实验。"
+      },
+      {
+        "question": "新模型需要新增特征，如何兼容旧模型回滚？",
+        "answer": "先部署向后兼容的数据供给，让新特征可用并验证覆盖率，再发布消费它的新模型；旧模型继续读取其原有合约。模型 manifest 明确 feature schema 版本与缺失策略，避免把新字段位置插到旧向量中造成静默错位。回滚时确认旧特征仍在生产且 TTL 足够。如果数据迁移不可逆，就不能把“切回旧镜像”当作完整回滚计划。",
+        "signal": "模型与数据依赖的发布顺序。"
+      },
+      {
+        "question": "同一个 ONNX 文件为什么在另一种 GPU 上失败？",
+        "answer": "文件格式只定义模型表示的一部分，实际执行还依赖算子支持、backend 版本、driver、设备能力与某些优化制品的适用范围。先确定故障发生在加载、编译还是执行阶段，并在目标硬件验证算子和数值容差；必要时保留未经特定硬件优化的制品或另建兼容版本。不能把“格式相同”当成所有 runtime 和硬件都等价的承诺。",
+        "signal": "制品可移植性与运行时兼容。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“容器健康检查返回 200，就能接预测流量。”",
+        "fix": "检查所需模型版本的 readiness，再跑代表性 warm-up 与合约测试。"
+      },
+      {
+        "mistake": "“把 max_batch_size 改成 32 就能让任意模型支持 batching。”",
+        "fix": "batch 维度必须由模型本身支持，服务配置必须与签名一致。"
+      },
+      {
+        "mistake": "“回滚只要把 registry 指针改回旧版本。”",
+        "fix": "还要有旧温热容量、兼容特征和路由切换，否则指针变化不能立即恢复服务。"
+      }
+    ],
+    "bridge": "你可以直接复用熟悉的不可变镜像、灰度、健康检查和回滚经验。ML 额外要求是模型签名、特征 schema 与数值语义的兼容性；“服务没报错”不代表预测没有坏，质量信号还可能比错误率晚几个小时或几天出现。",
+    "english": "I would treat the model, feature schema, preprocessing, and runtime as one versioned deployment contract. Process liveness is not sufficient; the required model must be ready and representative warm-up requests must succeed. I would use golden cases for semantic correctness and a canary for latency, errors, and mature quality signals. Rollback must preserve compatible features and warm capacity for the previous version.",
+    "exercise": {
+      "task": "用 30 分钟写一份 v11→v12 发布 manifest 与 gate 清单，再设计三个故障制品验证阻断位置。",
+      "deliverable": "一份含 artifact digest、schema、feature version、runtime 的 JSON 草稿；一张发布与回滚顺序图。",
+      "checks": [
+        "错误 shape、错误 dtype 与缺失必需特征各有明确阻断 gate。",
+        "75 秒 warm-up 完成前的流量比例是 0，而不是 5%。",
+        "回滚图同时保留旧模型温热容量和兼容特征读取路径。"
+      ]
+    },
+    "rubric": [
+      "能列出模型版本之外至少三个必须绑定的合约字段。",
+      "区分 liveness、readiness 与代表性 warm-up。",
+      "解释 golden case 检查的语义错误。",
+      "给出 canary 停止扩量标准与质量标签延迟处理。",
+      "回滚方案包含容量、特征和路由。"
+    ]
+  },
+  "nvidia-metrics": {
+    "title": "监控看起来正常，怎么定位模型服务的 p99 回归？",
+    "minutes": 45,
+    "basis": "原文要点转述 + 自编面试演练",
+    "paraphrase": [
+      "Triton 文档把 Request Count、Inference Count、Execution Count 分开：一个请求可以带多个样本，一次模型执行又能合并多个请求。平均执行 batch size 可以在一致统计窗口与适用口径下，用 inference count 除以 execution count 估算；它不是 request count 除以 execution count，也不是延迟分位数。",
+      "文档中的很多 latency 指标是累计耗时计数器，用增量除以请求增量得到的至多是平均值。pending_request_count 表示已进入服务、但 backend 尚未开始执行的请求，它可能涉及不同调度等待位置，不能不加分析就等同于某一个物理队列长度。自编演练重点是把这些指标转成能验证故障假设的证据。"
+    ],
+    "prompt": "练习假设：业务侧 p99 从 80ms 升到 170ms，但 Triton 平均 request duration 仍为 20ms，GPU 利用率未明显变化。监控同时显示 1K requests/s、8K inferences/s、500 executions/s。解释这些数字，并给出定位和告警设计。",
+    "clarify": [
+      "业务侧计时起止点与 Triton 计时起止点是否相同？特征查询、网关排队和网络可能只出现在业务测量里。",
+      "指标按哪些模型版本、实例、shape 和状态聚合？低流量故障版本可能被健康高流量版本的平均值掩盖。",
+      "缓存、ensemble、客户端 batching 与 counter reset 如何影响计数？计算前必须对齐窗口并明确计入规则。"
+    ],
+    "concepts": [
+      {
+        "term": "Counter / gauge / histogram · 计数器、瞬时值与分布",
+        "explanation": "counter 随事件累积，要用时间窗口的增量或 rate；gauge 描述当前值如 pending；histogram 把耗时落入桶，可估计分位数但精度受桶边界影响。"
+      },
+      {
+        "term": "Tail latency · 尾延迟",
+        "explanation": "p99 表示约 99% 的观测耗时不超过该值。平均 20ms 不能排除少数请求超过 1 秒，尤其在慢特征或突发队列存在时。"
+      },
+      {
+        "term": "Metric cardinality · 指标维度基数",
+        "explanation": "model/version/status 等有限标签有助诊断；request_id 或 user_id 作为指标标签会生成海量时间序列，应放在抽样 trace/log 中。"
+      }
+    ],
+    "tests": [
+      "能准确计算 batch 与平均耗时，拒绝从计数器编造 p99。",
+      "能解释边界、聚合与流量组成造成的监控错觉。",
+      "能把指标、trace、日志与有用户影响的告警连接起来，定位故障而非堆仪表盘。"
+    ],
+    "shortAnswer": "这组计数在窗口与缓存口径一致时说明每请求平均 8 个样本、每次执行平均 16 个样本，不能推出 p99。业务 170ms 与 Triton 平均 20ms 也不冲突：两者统计量和计时边界不同。我会先看端到端延迟分布和失败比例，按模型版本、shape、租户等级切片，再用抽样 trace 分解特征、排队、执行与返回。告警绑定超时和 SLO 消耗，并用 pending、执行耗时、资源指标帮助定位；高基数请求信息放 trace，不放每个指标标签。",
+    "deepAnswer": [
+      {
+        "title": "先对齐测量口径",
+        "body": "定义端到端从业务请求到可用预测返回的计时边界，区分成功、失败、取消与 fallback。Triton 的服务内耗时不自动包含上游特征计算；平均值也不能与业务 p99 直接相减。对比相同时间窗口、模型版本和请求集合，记录服务重启导致的 counter reset，使用适当的 rate/increase 方法，而不是把累积总量直接相除。"
+      },
+      {
+        "title": "把平均数拆成可解释的分布",
+        "body": "端到端、queue 与 execution 分别采集直方图，桶边界围绕业务 SLO 设置并保留较长尾部。按版本、区域、shape 分桶或租户服务等级分析，避免用所有请求的平均掩盖少数坏分组。跨实例聚合 histogram 时先合并对应桶计数再求分位数；不能把每实例 p99 简单平均。服务端 summary 分位数一般也不能任意跨实例合并。"
+      },
+      {
+        "title": "用 trace 区分故障路径",
+        "body": "同一请求串起网关、特征查询、预处理、排队、模型执行和后处理，记录模型/特征版本、batch/shape 类别与 fallback 原因。异常和慢请求优先采样，保留一定正常样本作对照。若服务内 execution 稳定但特征 RPC 长尾上升，扩 GPU 没有针对性；若 queue 增大而 execution 稳定，优先看入流、可用容量与调度。"
+      },
+      {
+        "title": "让告警反映用户损失",
+        "body": "将超时、错误和超过延迟阈值的请求比例与 SLO/error budget 连接，采用短长窗口观察持续性；pending、GPU、CPU 和缓存 miss 更适合作为定位信号。对 fallback 单独计数，因为返回 HTTP 200 但总走降级也可能影响质量。告警应包含 runbook、版本与最近部署，避免每个相关资源指标同时把值班人轰炸。"
+      },
+      {
+        "title": "把成本与质量纳入同一解释",
+        "body": "除了 requests/s，还记录成功 samples/s、每次执行 batch 分布、单位有效预测成本和成熟标签上的质量。缓存命中会改变某些推理计数口径；ensemble 节点执行也可能让直观比值失真，必须按文档与实际配置解释。监控结构应允许回答“变快是因为模型更好，还是因为拒绝了难请求”，避免优化仪表盘而牺牲用户。"
+      }
+    ],
+    "architecture": "业务请求 → E2E histogram / 状态\n   └ trace：特征 → queue → inference → 返回\n              ↓\n model / version / shape 分组\n              ↓\n SLO 告警 → trace 样例 → runbook\n              ↑\n pending、资源、batch、部署事件",
+    "calculation": {
+      "problem": "练习假设：同一非 ensemble 模型及版本、同一60秒窗口，无缓存与counter reset；所有请求均成功完成，duration、request、inference、execution计数覆盖同一请求集合。记录60000 requests、480000 inferences、30000 executions。",
+      "steps": [
+        "每请求样本数 = 480000 / 60000 = 8。",
+        "每次执行平均 batch = 480000 / 30000 = 16；平均每次执行合并 2 个请求。",
+        "若累计 request duration 增加 1200000000 微秒，平均请求耗时 = 1200000000 / 60000 = 20000 微秒 = 20ms。"
+      ],
+      "conclusion": "这四个总量没有延迟分布，无法求 p99；即使平均值相同，少量极慢请求也可以使尾延迟差很多。"
+    },
+    "followups": [
+      {
+        "question": "能不能把各服务 p99 相加得到端到端 p99？",
+        "answer": "不能直接这样算。分位数取决于联合分布：不同请求可能在不同阶段慢，阶段之间也可能相关。串行路径的总耗时确实是每个请求各段耗时之和，但这些和的 p99 通常不等于各段 p99 的和。可以分配设计预算、用 union bound 做保守风险分析，但最终仍要测同一端到端请求的分布；并行路径还要看最大分支而非简单求和。",
+        "signal": "分位数与端到端组合的统计理解。"
+      },
+      {
+        "question": "两个实例 p99 是 10ms 和 1s，平均后报告 505ms 对吗？",
+        "answer": "不对，两个实例请求数量可能完全不同，且分位数无法靠简单平均恢复总体分布。若它们使用相同 histogram 桶，可以先按窗口聚合桶计数，再求整体分位数，并保留按实例切片。总体指标还可能隐藏小流量坏实例，因此同时看每实例或每版本的 SLO 违反比例，避免只保留一个汇总数字。",
+        "signal": "正确聚合与小流量故障可见性。"
+      },
+      {
+        "question": "为了精确定位，可以把 user_id 加到 Prometheus 标签吗？",
+        "answer": "通常不应这样做。用户 ID 会使时间序列数量随用户增长，带来内存、存储和查询负担，还可能扩大敏感信息暴露。指标保留有限、可控制的标签，如模型版本、区域、状态、长度桶；请求级上下文放在经过权限、脱敏与采样控制的 trace 或日志里，用 trace ID 从告警跳到具体样例，而不把每个用户变成一条长期指标序列。",
+        "signal": "可观测性的可运营性与数据最小化。"
+      },
+      {
+        "question": "成功率 99.99%，但用户投诉排序变差，监控漏了什么？",
+        "answer": "HTTP 成功只说明接口返回，不说明模型预测有用。检查 fallback、默认特征、特征 freshness、版本分布与输出分布，确认是不是大量请求被轻量规则接管。业务质量需成熟标签和分群评估，例如不同地区、冷启动商家或长尾时段，不能把 distribution drift 直接等同于质量下降。先找数据与版本变化的证据，再决定回滚模型或修复特征。",
+        "signal": "系统健康与 ML 质量的区别。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“累计耗时除请求数，就是 p99。”",
+        "fix": "它至多是匹配口径的平均值；p99 需要分布或足够的观测样本。"
+      },
+      {
+        "mistake": "“每实例 p99 平均即可得到全局 p99。”",
+        "fix": "聚合相同边界的 histogram 桶后再算分位数，并保留故障分组。"
+      },
+      {
+        "mistake": "“GPU 利用率正常，所以模型服务没有问题。”",
+        "fix": "特征、队列、网络、fallback 和质量都可能有问题，要从用户 SLO 反向定位。"
+      }
+    ],
+    "bridge": "你可以沿用高并发服务的 RED 指标、trace 与错误预算。ML 新增的关键是 request/sample/execution 三种工作量、模型和特征版本、fallback 与质量标签延迟；同样 1000 QPS，样本数与 shape 变化就可能让计算成本相差数倍。",
+    "english": "The counters imply eight samples per request and sixteen samples per execution, assuming matching scopes and no cache effects. They do not tell us the ninety-ninth percentile. I would compare end-to-end histograms with service-level measurements, then trace feature fetches, queueing, and execution by model version and input-shape bucket. Alerts should reflect user-visible SLO violations, with resource metrics used to diagnose the cause.",
+    "exercise": {
+      "task": "用 25 分钟设计一个六块仪表盘，并用上述计数写出三个正确结论与两个不能推出的结论。",
+      "deliverable": "指标名称/单位/聚合方式表，以及一条从 SLO 告警到 trace 的排查路径。",
+      "checks": [
+        "算出每请求 8 样本、每执行 16 样本、平均 20ms。",
+        "明确写出无法由这些计数求 p99，也不能推断模型质量。",
+        "仪表盘含端到端分布、失败/fallback、queue、execution/batch、资源、版本事件。"
+      ]
+    },
+    "rubric": [
+      "三种计数单位准确。",
+      "没有把平均数或分段分位数误作整体 p99。",
+      "排查路径能区分特征、队列与执行瓶颈。",
+      "指标标签没有无限增长的用户或请求 ID。",
+      "成功率之外考虑 fallback 与成熟质量指标。"
+    ]
+  },
+  "dd-index-65": {
+    "title": "从事件到训练样本：设计可追溯的 ML 数据平台",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "这篇 DoorDash 文章目前只核验到标题和链接，下面没有转述其未读正文。围绕“扩展数据平台”这一主题，自编题关注完整生命周期：业务事件怎样同时支持实时预测和未来训练，以及某个模型出问题时，如何追溯它用过哪一份数据。数据平台不只是把 Kafka 数据存进湖仓，还要保证不同用途对时间、版本和质量的解释一致。",
+      "对后端工程师来说，最容易漏掉的是历史训练样本必须模拟预测当时能知道的信息。今天已经补齐的事件、退款结论或用户行为，不能直接回填到过去样本里当作已知输入。平台需要把事件发生时间、数据实际可用时间、样本生成版本和标签观察窗口一起建模，否则离线分数可能很好，上线却失效。"
+    ],
+    "prompt": "自编演练：订单事件既要驱动分钟级特征，又要生成每日训练数据。事件会迟到和修正，业务希望重跑过去三个月的实验并定位受错误事件影响的模型。请设计入口、存储、样本构建、血缘和质量门槛。时间跨度均为练习假设。",
+    "clarify": [
+      "训练目标是重现历史服务实际看到的输入，还是评估在改进数据时效后可能达到的表现？二者数据集语义不同，不能混用同一离线分数。",
+      "事件是否有稳定 ID、修订号、event_time 与 available_at？若没有，去重、历史更正和 point-in-time join 的保证会明显减弱。",
+      "训练标签的观察期和反转规则是什么，例如取消或退款何时确定？这些规则决定可训练样本的截止时间及再生成策略。"
+    ],
+    "concepts": [
+      {
+        "term": "Point-in-time join · 时点正确关联",
+        "explanation": "给历史预测样本选择当时已发生且当时可获得的特征，而不是把实体今天的最新状态拼到过去。事件时间正确只是必要条件，可用时间也可能造成泄漏。"
+      },
+      {
+        "term": "Bitemporal data · 双时间数据",
+        "explanation": "分别记录事情发生或生效的时间，以及系统何时知道该记录。晚到事件和事后修正会让两条时间轴不同，历史重放时必须选择对应的可见性语义。"
+      },
+      {
+        "term": "Data lineage · 数据血缘",
+        "explanation": "记录原始数据快照、变换版本、特征产物、训练样本和模型之间的引用链。它用来回答某个源数据 bug 影响了哪些实验和上线模型。"
+      }
+    ],
+    "tests": [
+      "能否画出在线低延迟路径与离线历史计算路径，并解释共享语义、不同存储职责。",
+      "能否用迟到事件的时间线说明泄漏，而不是只说“避免未来数据”。",
+      "能否定义可重跑的数据集身份、标签成熟门槛和故障影响范围。"
+    ],
+    "shortAnswer": "我会保留可追溯的原始事件与修订记录，入口先验证 schema、事件 ID 和两种时间戳。在线路径用流处理物化最新特征，离线路径保留历史快照来构造训练样本；二者共享特征契约，但读取模式不同。训练 join 必须同时限制事件发生时间和数据可用时间，标签只纳入观察窗口已经成熟的样本。每个训练集记录源快照、变换版本和质量报告，模型 registry 引用这些清单。出现错误数据时沿血缘确定影响范围，再生成新版本而不是悄悄改写旧实验的输入。",
+    "deepAnswer": [
+      {
+        "title": "从入口建立可解释的事件契约",
+        "body": "事件包含 event_id、entity_id、event_time、available_at、schema_version 和必要的修订标识。原始层保留原始载荷及接收元数据，坏记录进入可追踪隔离区，而不是静默丢弃。去重和修订应保留审计关系：同一业务事件重复发送与真实取消、更新是不同情况。原始历史保留要受权限和删除要求约束，不能把可追溯误解为永远不可删除任何数据。"
+      },
+      {
+        "title": "分开服务最新值与训练历史",
+        "body": "在线层为实体键随机读、批量读和低尾延迟优化，可存近期物化结果；离线层存版本化事件和特征历史，为扫描、join 和重算优化。不能让训练直接扫描 Redis 当前值来生成过去样本，也不应让在线请求临时扫描完整历史。共享的是特征定义、默认值与时间契约，不必强行使用同一种数据库。通过抽样请求日志核对在线实际看到的值。"
+      },
+      {
+        "title": "让样本构建显式处理时间和标签",
+        "body": "为每个 prediction_time 先过滤当时可用的记录，再按事件时间选取有效特征或计算窗口。事后到达但 event_time 更早的事件，在重现历史服务时仍应排除；若要分析“更低延迟的数据会怎样”，另建明确命名的反事实数据集。标签可以在预测后产生，但只能作为监督目标，不能泄漏回输入；样本是否成熟由观察窗口与反转规则决定。"
+      },
+      {
+        "title": "以不可变身份组织回填与模型血缘",
+        "body": "数据集 manifest 记录源快照、代码 commit、特征版本、时间区间和质量校验。回填产生新版本并对比旧版本，而不是覆盖旧实验输入；资源上限制历史扫描并发，避免拖慢实时链路。训练作业和模型 registry 引用 manifest，遇到源 schema 错误可以沿图查找受影响样本和模型。只有通过数据质量、样本量和切片检查的新数据集才允许进入后续训练。"
+      }
+    ],
+    "architecture": "业务事件 → 契约校验 → 可追溯原始历史\n              ├→ 流处理 → 在线特征 → 预测日志\n              └→ 历史变换 → 特征历史\n                                  ↓\n预测时点 + 成熟标签 → 时点正确 join\n                                  ↓\n数据集 manifest → 训练 → 模型 registry\n        └──── 血缘与质量报告 ────┘",
+    "calculation": {
+      "problem": "练习假设：预测时刻为 10:00。记录 A 的 event_time=09:55、available_at=09:56、值=2；记录 B 的 event_time=09:58、available_at=10:03、值=3；记录 C 的 event_time=10:01、available_at=10:01、值=4。",
+      "steps": [
+        "重现 10:00 服务输入时，要求 event_time ≤ 10:00 且 available_at ≤ 10:00。",
+        "A 同时满足两个条件；B 虽然事件发生较早，但当时尚不可用；C 属于预测之后。",
+        "对这个“最新状态值”特征，在有效记录中取最新 event_time，因此结果为 A 的值 2。只过滤 event_time 会错误选择 B 的值 3。"
+      ],
+      "conclusion": "实际可见性可能还受物化延迟影响，因此 available_at 应定义为目标服务可读取的时间，或结合真实特征快照；不能把消息到达 Kafka 的时间自动等同于可服务时间。"
+    },
+    "followups": [
+      {
+        "question": "迟到数据明明更准确，训练为什么不能直接用补齐后的值？",
+        "answer": "要看训练目标是否与上线输入一致。若生产在预测当时拿不到补齐值，却在训练中总能得到，模型会学习依赖生产不存在的信息，形成时间可用性偏差。可以使用补齐后的事实生成未来标签或做分析，但输入应模拟服务可见性。若平台计划同时改善线上数据时效，应为新链路单独构建训练与评估数据，并用回放验证新时效确实达到，而不能把理想输入当作当前服务输入。",
+        "signal": "可用时间泄漏与训练目标一致性"
+      },
+      {
+        "question": "数据被删除或修正之后，不可变数据集怎么办？",
+        "answer": "不可变指版本身份稳定，不代表拒绝合法删除或纠错。修正通常生成新数据版本并记录取代关系；删除要求可能需要移除对象、重写受影响分区并使旧 manifest 标记失效或不可访问。血缘用于识别受影响模型和缓存，决定是否需重新训练。平台要保留允许保留的审计元数据，同时避免继续从历史快照读取已删除数据。不能为了可复现性保留本应删除的原始记录。",
+        "signal": "版本可追溯性与数据生命周期管理"
+      },
+      {
+        "question": "训练数据每天生成失败，为什么不临时让训练直接读线上 Redis？",
+        "answer": "Redis 当前值只能说明读取时的状态，通常没有足够历史去重建每个训练样本当时的输入，直接读会引入未来信息，并给在线服务增加不可控负载。更合理的应急措施是使用最近通过验证的离线数据快照、暂停发布或从原始历史重建受影响分区。若确实记录了线上请求特征，可以构建明确定义的日志训练集，但需处理抽样、曝光选择偏差和标签 join，不是随意替代。",
+        "signal": "在线与离线存储职责及事故止损"
+      },
+      {
+        "question": "三个月回填太慢，怎样加速而不破坏一致性？",
+        "answer": "先按变换依赖和数据分区定位真正受影响范围，避免整条 DAG 全量重跑；复用版本匹配的中间产物，以配额控制并发扫描和 shuffle。对可分解聚合做分区局部计算再合并，但必须证明窗口边界、去重与修订语义不变。回填使用独立输出版本，完成质量校验后再切换引用。速度优化不能跳过时间可见性条件，也不能让历史写入覆盖正在服务的更新。",
+        "signal": "依赖感知回填与正确性边界"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "event_time 在预测之前就一定可以用于训练。",
+        "fix": "还需确认当时已可用，必要时重现物化完成时间或实际请求快照。"
+      },
+      {
+        "mistake": "在线与离线一致意味着都用 Redis。",
+        "fix": "一致性首先是语义契约；在线随机读与离线历史 join 可以使用不同存储。"
+      },
+      {
+        "mistake": "修好数据后直接覆盖旧文件，所有实验自然变好。",
+        "fix": "生成有明确身份的新版本，记录旧结果受影响范围，并重新验证下游模型。"
+      }
+    ],
+    "bridge": "可以沿用日志平台的 schema、分区、幂等、血缘和回放经验。ML 要补的是训练样本的时间可见性以及标签生命周期：回放系统常追求最终正确事实，训练则可能必须重现当时尚不完整的信息，两种目标不能混淆。",
+    "english": "I would separate low-latency serving state from versioned historical data. Training examples would use features that were both valid and available at prediction time, with labels collected only after their observation window had matured. Every dataset and model would reference an immutable manifest. Backfills would create validated versions rather than silently rewriting the inputs of past experiments.",
+    "exercise": {
+      "task": "用三条给定记录实现或手写一个时点关联函数，再画出从错误源事件到受影响模型的血缘链。",
+      "deliverable": "一个输入输出表或小脚本，以及包含源快照、特征、数据集和模型四层的依赖图。",
+      "checks": [
+        "10:00 的结果必须为 2，而不是 3 或 4。",
+        "把 B 的 available_at 改为 09:59 后，结果应变成 3。",
+        "说明 available_at 的定义是否包含物化延迟，并展示回填创建新版本而非覆盖旧输入。"
+      ]
+    },
+    "rubric": [
+      "明确在线最新值与离线历史的存储职责。",
+      "正确解释事件时间与可用时间。",
+      "标签成熟规则独立于特征可用规则。",
+      "能根据 manifest 重跑数据集。",
+      "故障影响范围可沿血缘定位到模型。"
+    ]
+  },
+  "dd-index-70": {
+    "title": "设计声明式特征平台：一份定义怎样安全服务多个模型？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "Fabricator 文章目前只核验到公开索引的标题和链接，下面是围绕声明式特征工程的独立教学演练，不宣称描述该项目内部实现。所谓“声明式”，是开发者描述特征是什么、依赖什么、怎样计算，而平台负责校验依赖、安排计算、物化和记录版本。它的价值不只是少写几行 SQL，而是让多团队共享可审查的语义契约。",
+      "最关键的面试矛盾是：模型把特征含义学进了参数。把“最近七天订单数”悄悄改成“最近三十天订单数”，即使字段名和类型没变，也可能让已有模型失效。因此特征版本必须与模型依赖绑定；同一份定义在 batch 与 streaming 引擎执行，仍可能因时区、NULL、边界或迟到语义产生差异，不能只用“代码复用”作为一致性证明。"
+    ],
+    "prompt": "自编演练：十个团队共享声明式特征平台。一个团队把订单计数窗口从七天改为三十天，已有二十个模型依赖旧特征。请设计 feature spec、依赖分析、双版本物化、训练验证和发布回退。数量与窗口均为练习假设。",
+    "clarify": [
+      "平台支持哪些变换，是有限的可验证算子还是任意用户代码？前者更容易跨引擎保证语义，后者需要更强隔离和测试。",
+      "特征更新是改变数值分布还是只修复保持语义的实现 bug？语义变化通常必须创建新版本并重新训练依赖模型。",
+      "模型怎样引用特征，是显式固定版本还是运行时拿 latest？如果是 latest，首先要补依赖锁定，否则无法安全迁移。"
+    ],
+    "concepts": [
+      {
+        "term": "Feature specification · 特征契约",
+        "explanation": "描述实体键、类型、单位、数据源、窗口边界、缺失策略、时区、新鲜度、owner 和版本。它既是计算输入，也是模型消费者的接口。"
+      },
+      {
+        "term": "Dependency DAG · 依赖有向无环图",
+        "explanation": "特征、数据集与模型之间的有向依赖图。修改上游时，平台沿图找出需要重新物化、评估或训练的对象，并拒绝循环依赖。"
+      },
+      {
+        "term": "Training-serving parity · 训练服务语义一致",
+        "explanation": "离线和在线计算对相同的可见输入给出相同含义的结果，包括时间边界和缺失处理；不是只要求使用相同函数名。"
+      }
+    ],
+    "tests": [
+      "是否把 feature spec 当作模型依赖的生产接口，而不是只存一段 SQL。",
+      "是否能提出跨引擎 golden tests、回放和影子对比来验证语义一致。",
+      "是否能设计消费者感知的版本迁移与回退，避免对共享特征原地改义。"
+    ],
+    "shortAnswer": "我会把特征定义做成版本化契约，除了计算逻辑，还包含实体键、窗口、时区、缺失和 freshness 语义。模型固定依赖版本，修改七天为三十天会生成新版本，平台沿依赖图展示受影响消费者。新旧特征分别物化，先用边界样例和历史回放核对离线在线语义，再完成新版本的历史数据构建与模型训练。灰度期间路由同时固定模型和特征版本，旧路径保留以便回退。平台可以共享定义和工具链，但不能假定不同执行引擎天然得到相同结果。",
+    "deepAnswer": [
+      {
+        "title": "先定义平台允许承诺的语义",
+        "body": "最小 spec 包括 entity key、输出 dtype 和单位、来源及修订规则、窗口区间、时区、默认值、freshness SLO、owner 与版本。编译阶段验证字段是否存在、依赖是否成环、变换是否受支持，以及模型消费者能否读取结果。选择有限算子集时，可以为每个算子定义 batch/streaming 一致的语义；开放任意 UDF 则必须明确可移植性与沙箱限制。"
+      },
+      {
+        "title": "通过证据验证多引擎执行",
+        "body": "建立包含窗口边界、重复、晚到、空值和浮点容差的 golden 输入，比较离线结果与按时间推进的在线模拟。再抽样真实预测请求，使用固定特征版本和当时可见数据回放，分类解释差异。离线处理完整历史而线上处理部分到达数据时，二者不应被无条件要求数值相等；测试必须对齐可见性假设，而不是靠宽松容差掩盖语义错误。"
+      },
+      {
+        "title": "把更改编译为可审查的迁移计划",
+        "body": "七天到三十天是语义变化，即便类型仍是整数，也不能覆盖 v1。计划展示需要回填的时间区间、依赖模型、预计存储与计算成本，以及双版本存活时间。先在独立命名空间构建 v2 历史和在线结果，质量门槛通过后再训练或验证消费 v2 的模型。训练清单固定对应特征版本，不能让训练拿 v2 而服务仍读 v1。"
+      },
+      {
+        "title": "发布单位是兼容的模型与特征组合",
+        "body": "定义可部署组合，如 model_v8 + feature_v2，而不是分别移动两个 latest 指针。灰度流量的日志记录组合版本，并核对缺失率、freshness、延迟和成熟标签效果。回退要同时恢复旧模型依赖关系，旧特征物化直到无活跃消费者和保留期结束才回收。控制面更新失败时，应保持已有可用组合，不让半完成迁移暴露给在线请求。"
+      }
+    ],
+    "architecture": "开发者提交 feature spec\n  ↓ schema / DAG / 语义校验\n版本 registry → 影响分析 + 迁移计划\n  ├→ batch 编译 → 历史特征 v2 → 训练集\n  └→ stream 编译 → 在线特征 v2\n          ↓ golden tests / 对齐回放\n模型 v2 + 特征 v2 → 灰度路由\n旧模型 + 特征 v1 ← 保留回退路径",
+    "calculation": {
+      "problem": "练习假设：预测时刻是第 30 天 12:00，订单发生在第 1、10、24、29 天各一次。窗口定义为 (t−W, t]，事件均在预测前可用。",
+      "steps": [
+        "七天窗口起点为第 23 天 12:00，计入第 24 和 29 天，共 2 次。",
+        "三十天窗口覆盖给定四次订单，共 4 次；字段类型完全相同，但值的统计含义已经变化。",
+        "若某模型学到“计数 ≥ 3 是高活跃”，在输入被原地从 v1 换成 v2 后，会对同一用户改变分类，即使模型文件没有更新。"
+      ],
+      "conclusion": "示例只说明接口语义变化风险，不证明真实模型应使用这个阈值。兼容性检查不能仅检查字段类型和名称。"
+    },
+    "followups": [
+      {
+        "question": "共享一份 Python 函数，为什么还会有 training-serving skew？",
+        "answer": "函数之外的上下文仍可能不同：离线输入已经补齐、线上事件晚到；序列化把空值变成零；时区或浮点精度不同；执行引擎对窗口边界和排序有不同处理。即使同一个函数，对不同可见输入计算也会不同。应把输入时间语义、schema、默认值和版本一起固定，再用边界样例及线上回放验证。共享函数能减少实现重复，却不能替代端到端数据契约与一致性证据。",
+        "signal": "代码一致与数据语义一致的区别"
+      },
+      {
+        "question": "只是把 JSON 换成二进制编码，也一定需要重新训练吗？",
+        "answer": "不一定。若编解码在类型、精度、缺失语义和字段顺序上保持等价，这是表示层迁移，可以通过兼容测试、双读对比和灰度完成，而不必机械重训。仍需给编码协议版本，验证旧消费者和回滚路径。若压缩或类型缩减改变数值精度，例如 float64 转 float16，或默认值语义变化，则要量化输入差异对模型输出和效果的影响，再决定是否需要重新训练或重新校准。",
+        "signal": "语义变化与表示变化的风险分级"
+      },
+      {
+        "question": "一个上游特征被两百个模型引用，怎样避免每次修复都重跑所有模型？",
+        "answer": "先区分真正受影响的版本、时间区间、实体范围和变换路径。依赖图给出候选影响范围，再通过变更语义和抽样差异缩小；只读旧版本的模型可以暂不迁移。对保持输出等价的修复，可用证据证明无需重训；改变分布或纠正训练数据的修复则需对相关模型重新评估，必要时重训。平台应展示每个消费者的处理状态，不能用“影响太多”作为忽略依赖的理由。",
+        "signal": "依赖分析、增量执行与变更管理"
+      },
+      {
+        "question": "新模型已经上线，旧特征作业能立即删除吗？",
+        "answer": "不能只看默认流量已切换。先确认是否还有灰度、回滚、批量评分或其他模型引用旧版本，并检查约定保留期。旧特征作业若被删除，模型参数虽然能回滚，输入却无法恢复，就不是有效回滚方案。可以在无消费者后停止在线物化，但保留重建所需的定义、历史输入和产物版本；删除前让平台生成消费者清单和可恢复性检查，避免依靠人工记忆。",
+        "signal": "消费者感知回收与真正可用的回滚"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "类型没变就是兼容变更。",
+        "fix": "窗口、单位、缺失和时间语义变化都可能改变模型输入含义，需要新版本与消费者迁移。"
+      },
+      {
+        "mistake": "统一 DSL 后离线在线自然完全一致。",
+        "fix": "对齐可见性并验证执行引擎的边界、空值、时区和数值语义。"
+      },
+      {
+        "mistake": "模型和特征各自发布 latest，靠最终一致。",
+        "fix": "路由固定兼容的模型与特征组合，保留旧组合的回退路径。"
+      }
+    ],
+    "bridge": "可以把特征版本当作后端 API schema 和配置发布来理解，复用依赖分析、兼容迁移、灰度和回滚经验。ML 特有差别是消费者已经通过训练学习了输入分布；一个看似兼容的整数值定义变化，也会改变模型行为。",
+    "english": "A feature definition is a production contract consumed by trained models. I would version its semantics, including window boundaries, missing values, and time availability, and pin model dependencies explicitly. A semantic change would produce a new feature version with validated historical and online outputs. I would roll out and roll back compatible model-feature bundles rather than moving independent latest pointers.",
+    "exercise": {
+      "task": "写一份包含时间与缺失语义的 feature spec，并为七天到三十天窗口迁移设计六个测试样例和发布清单。",
+      "deliverable": "v1/v2 两份契约、依赖模型列表、golden 输入输出和灰度回退步骤。",
+      "checks": [
+        "示例 v1 结果为 2，v2 结果为 4，并写明 (t−W, t] 边界。",
+        "测试包含恰在窗口边界、晚到、空值和重复事件。",
+        "上线引用固定模型与特征版本，回退步骤保留可用的旧物化结果。"
+      ]
+    },
+    "rubric": [
+      "spec 不只包含计算 SQL，还包含时间、缺失和 owner。",
+      "说明共享定义仍需跨引擎测试。",
+      "识别窗口变化属于语义变化。",
+      "迁移具有双版本验证与消费者清单。",
+      "模型和特征组合能一起回退。"
+    ]
+  },
+  "dd-index-76": {
+    "title": "Kafka + Flink 写 Redis：重启后怎样避免特征翻倍？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "这条来源只核验到 Kafka/Flink 文章的索引，下面不是对原文实现的摘要。自编题聚焦一个经常被“exactly-once”口号掩盖的边界：Flink 能把算子状态和消费位置恢复到一致 checkpoint，但外部 Redis 写入若不参与同一个提交协议，仍可能在恢复后重复执行。源和计算层有保证，不等于从业务事件到最终特征全链路自动有同样保证。",
+      "ML 实时特征会把这种错误放大为模型输入偏差。比如“过去五分钟下单数”在重启后突然翻倍，服务依然返回 200，数据类型也合法；只有对聚合语义、sink 幂等和恢复时序有明确设计，才能防止安静地污染预测。与普通日志消费相比，还要解释错误值被模型使用多久，以及怎样检测、回退和补正。"
+    ],
+    "prompt": "自编演练：Flink 从 Kafka 读取订单，按商家计算窗口订单数并写 Redis。一次 checkpoint 尚未完成时 worker 崩溃，恢复后出现计数翻倍和旧值覆盖新值。设计可靠写入与恢复协议，并说明能够承诺的边界。",
+    "clarify": [
+      "Redis 写入是 INCR 增量还是完整聚合值？两者重复执行的影响不同，决定选择事件去重还是幂等快照 upsert。",
+      "一个实体或窗口是否只有一个逻辑写入者，扩缩容与 backfill 会不会并发写同一个 key？多写入者需要定义可比较版本和所有权。",
+      "业务接受暂时旧值、拒绝服务还是备用特征？恢复期间的 freshness 与准确性目标决定是否保留旧值、切 fallback 或等待追平。"
+    ],
+    "concepts": [
+      {
+        "term": "Checkpoint · 一致恢复快照",
+        "explanation": "Flink 保存算子状态和相应输入进度，使失败后能从一致位置继续计算。它是否覆盖外部写入，需要看 sink 的具体提交或幂等机制。"
+      },
+      {
+        "term": "Idempotent upsert · 幂等覆盖写",
+        "explanation": "同一逻辑结果被写入多次不会改变最终值。例如把窗口计数写为 7，重复写仍是 7；对 Redis INCR 7 重试则会变成 14。"
+      },
+      {
+        "term": "Fencing token · 写入隔离令牌",
+        "explanation": "新一代合法 writer 获得更高的所有权代号，sink 拒绝旧 writer 的迟到写入。它用于防止旧进程仍存活时污染新结果，但需要控制面可靠分配。"
+      },
+      {
+        "term": "Watermark · 事件时间进度估计",
+        "explanation": "系统对事件时间推进的估计，用于判断窗口何时可以输出或清理状态；它不是保证再也没有旧事件到达的物理定律。"
+      }
+    ],
+    "tests": [
+      "能否准确指出 Flink checkpoint 与非事务外部 sink 之间的故障窗口。",
+      "能否设计写入身份、版本顺序和恢复测试，而不是笼统声称 exactly-once。",
+      "能否区分重复事件、重复提交、乱序写入和并发 writer 这四种不同问题。"
+    ],
+    "shortAnswer": "我会先确认 sink 是否真正参与 checkpoint 提交；如果只是普通 Redis 命令，就不承诺端到端 exactly-once。对窗口特征优先写完整聚合快照，并给结果稳定身份和可比较修订版本，Redis 原子地只接受合法的新版本。业务重复事件在计算层按 event_id 去重，重复写入则由 sink 幂等处理；旧 writer 还需要 fencing 或明确单写者约束。恢复时从 checkpoint 重放，对比在线值与参考聚合，并监测 event-time 进度和 freshness。历史回填使用独立命名空间，验证后再切换，避免和实时更新抢写。",
+    "deepAnswer": [
+      {
+        "title": "先画出故障窗口",
+        "body": "假设输入消费到 offset 105，Redis 已被更新，但最近成功 checkpoint 只记录到 offset 100。失败恢复后 101–105 会再次被处理；若 sink 是 INCR，就重复累加。Flink 内部状态恢复正确并不能撤销 Redis 已完成的命令。若使用支持 checkpoint 协调的事务 sink，要解释 prepare/commit、超时和事务恢复；对普通 Redis 路径则应明确选择幂等写入策略。"
+      },
+      {
+        "title": "用稳定身份分别解决重复与顺序",
+        "body": "对每个 entity、feature_version 和 window 标识写完整值；同一结果重复提交应产生相同值与修订身份。原子条件写入比较合法 writer generation 与该窗口内可比较的 revision，拒绝旧结果覆盖新结果。revision 的含义必须在恢复和重放后仍成立，不能用每次进程启动从零计数的本地序号。fencing 只验证写权限，不能让较新 generation 绕过数据 revision 检查；恢复尚未追平时不发布更旧的快照。若存在多个独立源或写入者，不能假装单个 Kafka offset 代表所有输入的全序，需要单写者聚合、可合并状态或明确冲突策略。"
+      },
+      {
+        "title": "业务去重与 sink 幂等分开做",
+        "body": "同一订单事件本身可能被业务重复发送，应以 event_id 和合理保留窗口在计算层去重；同一个聚合结果因失败重复写入，则由 sink 幂等处理。去重状态过早清理会让很晚的重复重新计入，因此要定义最大重放与迟到范围。计数可以完整快照覆盖，但某些跨窗口更新和补偿需要更复杂状态，不能靠盲目 SET 就获得业务正确性。"
+      },
+      {
+        "title": "用故障注入证明恢复行为",
+        "body": "构造在 Redis 写入前、写入后但 checkpoint 前、checkpoint 后三个位置崩溃的测试，比较最终状态与无故障参考计算。再测试旧 writer 延迟响应和不同 revision 逆序到达，确保 CAS 是原子的。恢复期间按事件时间进度而非仅按 consumer offset 判断 freshness；若模型不能容忍落后值，应对受影响实体走已验证 fallback。回填隔离输出与资源，并通过对账后受控切换。"
+      }
+    ],
+    "architecture": "Kafka 事件 → event_id 去重 → 窗口聚合状态\n                  ↓ checkpoint（状态 + 输入进度）\n完整结果：entity / window / version / revision / value\n                  ↓\nRedis 原子条件 upsert ← writer fencing\n                  ↓\n服务读取 + freshness 检查 → 模型 / fallback\n独立 backfill namespace → 对账 → 受控切换",
+    "calculation": {
+      "problem": "练习假设：最近 checkpoint 中窗口计数为 5。之后处理两个新事件，Redis 已写入结果 7，但作业在下一次 checkpoint 前崩溃。",
+      "steps": [
+        "若每个事件都执行 INCR，Redis 原有 5，第一次处理后变 7；恢复再处理两次后变 9，业务真实结果仍应是 7。",
+        "若计算状态从 5 恢复，重放得到完整结果 7，再用同一结果身份覆盖写入，最终仍是 7。",
+        "若旧结果 6 在结果 7 之后才到达，单纯 SET 会回退；必须用可比较 revision 的原子条件写入拒绝旧结果。"
+      ],
+      "conclusion": "完整值写入解决同一结果重复提交，不自动解决过期结果、业务重复事件或多写者冲突，必须逐个说明边界。"
+    },
+    "followups": [
+      {
+        "question": "Kafka 和 Flink 都配置了 exactly-once，为什么 Redis 还会错？",
+        "answer": "这两个配置只在它们实际参与的一致性范围内生效。Flink 可以协调输入进度与算子状态，但普通 Redis 写操作可能在 checkpoint 成功之前已经对外可见，失败后重放会再次执行。必须检查具体 connector 是否具有事务提交、恢复或幂等保证，不能从作业配置名推断外部系统行为。面试时应画出“外部写已成功，checkpoint 未成功”的时间线，再提出可验证的 sink 方案。",
+        "signal": "保证范围与跨系统提交协议"
+      },
+      {
+        "question": "把 INCR 改成 SET 是不是就全部解决了？",
+        "answer": "只解决了一部分：同一个完整结果重复 SET 是幂等的，但旧结果延迟到达仍会覆盖新结果，两个 writer 也可能相互覆盖。需要稳定的结果标识、与业务一致的 revision 顺序和原子比较写；同时计算层要去重原始业务事件。若值是滚动窗口总量，还要考虑窗口推进、到期清理和迟到修正，不能用 event_time 最大值粗略代表整个窗口的计算版本。",
+        "signal": "幂等性不等于顺序正确或业务正确"
+      },
+      {
+        "question": "用 Kafka offset 当版本号可不可以？",
+        "answer": "在同一实体始终由一个确定分区和单一源有序处理、且输出覆盖全部前缀语义时，offset 可以成为版本设计的一部分。但跨分区、多个输入 topic、重分区、回填和窗口修订时，不同 offset 不具备全局可比较性。需要固定逻辑分区和 writer 所有权，或使用受控 generation 加局部 revision；多源聚合则可能需要记录输入进度向量或由单一聚合器输出最终版本。先讲约束，再谈实现。",
+        "signal": "版本全序的前提与分布式输入边界"
+      },
+      {
+        "question": "恢复要重放六小时，在线请求怎么办？",
+        "answer": "先根据特征契约区分可接受旧值与必须降级的特征。旧值若已超过 freshness 上限，就切到训练时验证过的缺失处理或备用模型，并明确标记 fallback，不能让缓存存在掩盖落后。恢复资源需要限额，避免追赶过程拖垮 Redis 和在线服务；可在独立命名空间追平到确定切点，再验证和切换。监测的是事件时间覆盖进度与真实可服务结果，而不只是 CPU 或消费速率。",
+        "signal": "恢复期可用性、正确性与资源隔离"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "启用 checkpoint 后任何 sink 都 exactly-once。",
+        "fix": "检查 sink 是否参与提交或具备幂等与恢复协议，明确真正保证边界。"
+      },
+      {
+        "mistake": "本地自增 counter 可以跨重启当全局版本。",
+        "fix": "版本必须在恢复、重放和 writer 更替后仍可比较，并有可靠所有权机制。"
+      },
+      {
+        "mistake": "只验证正常消费路径。",
+        "fix": "在写入与 checkpoint 之间注入故障，还要测试乱序写入和旧 writer。"
+      }
+    ],
+    "bridge": "这是最适合发挥 Kafka/Flink 经验的题，但要把答案从“框架保证”推进到模型可见结果。你可以解释 checkpoint、watermark、幂等和背压，再补上特征 freshness、错误值对预测的影响，以及恢复期间模型该如何降级。",
+    "english": "I would not claim end-to-end exactly-once unless the sink participates in the guarantee. For windowed features, I would prefer complete aggregate snapshots with stable identities and atomic version checks over retrying increments. Business-event deduplication, sink idempotency, and stale-writer fencing solve different problems. I would validate the design by crashing between the external write and checkpoint completion.",
+    "exercise": {
+      "task": "写一个十几行的内存 sink 模拟器，分别实现 INCR、盲目 SET 和带 revision 的条件 SET，重放崩溃与乱序场景。",
+      "deliverable": "三种 sink 的结果表和至少四个故障输入序列。",
+      "checks": [
+        "INCR 重放示例得到错误值 9，参考值应为 7。",
+        "条件 SET 在先收到 revision 7 再收到 revision 6 后仍保留 7。",
+        "重复提交同一 revision 不改变结果，并说明业务 event_id 去重还在上游单独处理。",
+        "旧 writer 已写 revision 7 后，新 generation 从 checkpoint 重放 revision 6，仍须保留 7；更高 generation 不能绕过数据 revision 高水位。"
+      ]
+    },
+    "rubric": [
+      "正确画出写入成功但 checkpoint 未提交的窗口。",
+      "分开解释业务去重、写入幂等、版本顺序和 fencing。",
+      "说明 revision 在多源或多写者场景的限制。",
+      "具有可运行或可手算的故障注入案例。",
+      "恢复策略同时考虑 freshness 与在线负载。"
+    ]
+  },
+  "dd-index-108": {
+    "title": "设计 Redis Feature Store：低 p99、历史正确性与内存成本怎样兼顾？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "Redis Feature Store 文章目前只核验到索引标题与原始链接，因此下面的容量数字、架构和建议都是自编练习，不宣称来自原文。Feature Store 的在线部分像一个有更严格契约的实体 KV 服务：它要在预测截止时间内返回正确版本、可解释缺失语义和足够新的特征，而不仅仅是让 GET 成功。",
+      "它还需要独立的历史层来支持训练。在线 Redis 通常保存某实体近期可服务的值，不能代替过去每个预测时点的历史状态。序列化和压缩可以节省内存与网络，但会消耗 CPU、影响尾延迟和兼容性；“全部压缩”“全部塞一个大 key”都不是先验正确答案，应按实体访问模式和真实负载测量。"
+    ],
+    "prompt": "自编演练：模型服务峰值 40K 请求/秒，每个请求读取 20 个实体的特征，在线部分给 20ms 延迟预算。设计 Redis 在线特征层及离线历史层，并估算 1000 万实体、每实体 600B 载荷的成本。所有数字都是练习假设，不代表 DoorDash 负载。",
+    "clarify": [
+      "20 个实体分别是用户、商家还是候选商品，特征是否共享且能批读？实体访问与复用决定 key 布局、缓存和跨分片 fan-out。",
+      "20ms 是端到端分配预算还是实测组件 p99 SLO？需要明确超时与降级规则，不能把多个组件 p99 简单相加当作整体 p99。",
+      "每类特征允许多旧、缺失时怎样处理，模型固定哪些 schema 版本？这些决定 TTL、返回元数据、兼容和 fallback，而不是先定 Redis 参数。"
+    ],
+    "concepts": [
+      {
+        "term": "Online store · 在线特征层",
+        "explanation": "为预测时按实体键快速读取特征优化，通常返回当前可服务的版本和值。它不一定保留足够历史，不能直接承担训练时点关联。"
+      },
+      {
+        "term": "Feature view · 特征视图",
+        "explanation": "把一组实体键、特征定义、版本及时间语义组织成消费者可依赖的接口；同一模型应明确自己需要哪些视图版本。"
+      },
+      {
+        "term": "Freshness vs TTL · 新鲜度与过期时间",
+        "explanation": "TTL 控制 key 何时被删除；freshness 描述值反映业务变化的及时程度。一个 TTL 很长但更新停止的 key 可以存在很久，却早已不适合预测。"
+      },
+      {
+        "term": "Fan-out · 请求扇出",
+        "explanation": "一次模型请求触发多个特征分片或实体读取。即使单次读取很快，扇出越大，遇到慢分片和超时的机会越高，必须测整体请求延迟。"
+      }
+    ],
+    "tests": [
+      "能否从请求量转换为实体读量、载荷带宽和有余量的存储估算。",
+      "能否区分在线最新值、历史训练关联，以及 schema、缺失、freshness 三种契约。",
+      "能否解释批读、分片、压缩和降级对 p99 的具体影响，并设计公平的压测。"
+    ],
+    "shortAnswer": "我会先定义实体键、特征版本、freshness 和缺失契约，再把在线最新值与离线历史分开。在线按访问局部性组织特征，客户端按分片批读并设总 deadline，避免二十次串行往返；响应包含版本与时间元数据，超时或过旧时使用验证过的 fallback。容量上同时计算实体读量、载荷带宽、Redis 开销、副本与余量。二进制编码和压缩按真实 payload、热键及 CPU 负载做对照压测，比较整体请求 p99。离线训练使用版本化历史和时点正确 join，不从 Redis 当前值拼过去样本。",
+    "deepAnswer": [
+      {
+        "title": "明确在线读取契约",
+        "body": "key 至少区分实体类型、实体 ID 和特征视图版本，value 除特征数据还应携带 schema、生成或可服务时间以及必要的缺失信息。一个模型依赖的特征集合应能被一致解释；不必要求所有实体在全球同一瞬间原子更新，但需要明确可容忍的版本与时效差异。读取失败、实体不存在、特征过旧是不同状态，分别计量并由经过训练验证的策略处理。"
+      },
+      {
+        "title": "减少往返，同时控制扇出和排队",
+        "body": "避免逐特征串行 GET；按请求需要的特征组组织载荷，并按 Redis Cluster 分片进行批读或 pipeline。跨 slot 的 MGET 不应被假设为单条原子批读，客户端需了解分片边界。设置总请求 deadline 和有界并发，慢分片不能无限占用连接池；热实体可使用短期缓存或请求合并，但其 freshness 契约仍要成立。压测要使用真实 key 倾斜和候选数分布。"
+      },
+      {
+        "title": "用数据决定编码与压缩",
+        "body": "二进制协议要有 schema/编码版本，明确字段默认值和精度。把经常一起读的字段组合可减少命令与重复 key 开销，但过大的 blob 会造成读放大、更新冲突和解压成本。小对象压缩可能得不偿失，大对象则可能通过节省网络改善延迟；分别测 payload、CPU、GC、网络、内存和整请求 p99。迁移时支持旧新编码读取或双命名空间，保留快速回退。"
+      },
+      {
+        "title": "历史层承担训练与审计",
+        "body": "把版本化特征历史或可重建的原始事件写入适合扫描的存储，用 event_time 和实际 available_at 构造 point-in-time 数据集。Redis 淘汰和 TTL 不应决定训练历史保留策略。物化任务写在线层时使用防旧写覆盖机制，回填独立命名空间；模型上线前验证训练特征版本与服务读取版本匹配，并用真实请求样本检查 skew。"
+      }
+    ],
+    "architecture": "流 / batch 物化 → 版本化历史层 → PIT 训练 join\n        ↓\nRedis 分片：entity + feature_version\n        ↑ 分片内批读 / 有界并发\n特征客户端 → schema + freshness 检查\n        ↓ 合法特征 / 明确 fallback\n模型服务 → 请求级延迟与缺失监控",
+    "calculation": {
+      "problem": "练习假设：40K 请求/秒 × 每请求 20 个实体；每实体载荷 600B；共 1000 万实体。容量示例假设 Redis key/对象等额外开销是载荷的 40%，一主一副本，总内存规划再留 30% 余量。",
+      "steps": [
+        "实体读取量是 40,000 × 20 = 800,000 次/秒；批读减少命令和往返，不会自动把需要返回的实体数变少。",
+        "仅有效载荷带宽约 800,000 × 600B = 480,000,000B/s，即 480MB/s，尚未包括协议、TLS、重试与复制流量。",
+        "原始载荷为 10,000,000 × 600B = 6GB；加假设开销后为 8.4GB；一主一副本共 16.8GB。",
+        "按总内存的 70% 作为目标使用率，需要 16.8 ÷ 0.7 = 24GB。该数字不包括持久化 fork 的写时复制峰值等额外因素。"
+      ],
+      "conclusion": "40% 开销只是演练假设，实际需用代表性 key/value 和 Redis 内存统计测量；容量、命令吞吐、网络与热键可能分别决定分片数。"
+    },
+    "followups": [
+      {
+        "question": "既然缓存命中率 99%，为什么特征读取 p99 仍然很差？",
+        "answer": "先明确命中率统计单位是实体读还是整请求。一次请求读二十个实体，即使每个独立命中率为 99%，全部命中的概率约为 0.99 的二十次方，即 81.8%；真实相关性还会改变结果。还要检查命中路径本身的连接池排队、热分片、解压 CPU 和网络。不能用平均命中率推断 p99，应该按完整请求追踪各分片耗时并压测真实 key 分布，针对慢路径设置 deadline 和 fallback。",
+        "signal": "请求级扇出概率与尾延迟诊断"
+      },
+      {
+        "question": "把所有特征压成一个大 blob，会不会最省成本？",
+        "answer": "可能减少重复 key 和协议开销，但会把只需要少数字段的请求变成读放大，并把独立更新变成整块重写。大 blob 还会增加解压 CPU、连接占用和不同特征 freshness 耦合。应按共同读取和共同更新模式分组，比较编码前后的网络、内存、CPU 与整请求尾延迟。如果某组特征更新频率差异很大，应拆开并明确版本组合，而不是只追求最小字节数。",
+        "signal": "访问模式驱动的数据布局与压缩取舍"
+      },
+      {
+        "question": "特征过期后能不能去在线数据库实时重算？",
+        "answer": "可以作为经过容量验证的受限策略，但不能默认每个 miss 都同步扫描数据库。流量突发或缓存失效时会形成回源放大，把预测服务和业务库同时拖垮。要区分可廉价计算的 request-time 特征与依赖长历史聚合的特征；后者更适合预先物化、请求合并、后台刷新或备用模型。若允许回源，应有并发上限、总 deadline、熔断和明确的新鲜度要求，并评估训练是否覆盖该计算路径。",
+        "signal": "缓存故障放大与模型输入降级"
+      },
+      {
+        "question": "TTL 设置成五分钟，不就保证特征最多旧五分钟吗？",
+        "answer": "只有当每次写入都真实反映业务进度、TTL 不被无意义重置、源数据本身没有延迟时，这个推断才可能接近成立。若 writer 反复写同一个旧值并续 TTL，或者 Kafka 已落后半小时，key 仍可存活但特征已经很旧。需要在值中保留事件覆盖进度与实际生成时间，服务按 freshness 契约判定；TTL 主要负责过期删除与内存回收，不能替代端到端数据时效监控。",
+        "signal": "存储过期机制与端到端 freshness 的区别"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "20 个 GET 很快，串行调用也没关系。",
+        "fix": "往返与排队会累积，按分片批读、限制扇出并测量完整请求尾延迟。"
+      },
+      {
+        "mistake": "Redis 是 feature store，所以训练直接读取它。",
+        "fix": "在线最新值不能代替历史时点状态，训练需要独立的历史层与 PIT join。"
+      },
+      {
+        "mistake": "容量只算实体数乘 payload。",
+        "fix": "加入 key/对象开销、副本、利用率余量和故障峰值，实测确认假设。"
+      }
+    ],
+    "bridge": "可以充分使用已有 Redis、40K+ QPS 服务、连接池和热点治理经验，但面试表达不要停在缓存命中率。ML 特有增量是特征的时间语义、模型固定的 schema 与缺失分布，以及训练历史与在线最新值的分工。",
+    "english": "I would define the feature contract before choosing the key layout. The online store would provide versioned, fresh entity features within a request deadline, while the offline store would support point-in-time training joins. I would batch reads by shard and benchmark complete requests under realistic key skew. Compression would be a measured trade-off among memory, network, CPU, and tail latency, not a default requirement.",
+    "exercise": {
+      "task": "画出在线读路径与历史训练路径，完成容量表，再设计比较 JSON、二进制和压缩格式的公平压测计划。",
+      "deliverable": "一页架构、容量计算和包含负载分布/观测指标的实验表。",
+      "checks": [
+        "算出 800K 实体读/秒、480MB/s 有效载荷与示例 24GB 总内存。",
+        "明确跨分片批读与单个 MGET 的区别，给出总 deadline 和 fallback。",
+        "压测固定请求数据和 key 倾斜，记录整请求 p99、CPU 与字节数，而非只报压缩率。"
+      ]
+    },
+    "rubric": [
+      "能从请求 QPS 推导实体读量与带宽。",
+      "区分 freshness、TTL 和缺失语义。",
+      "在线与离线职责清晰且版本相连。",
+      "批读方案考虑 Redis Cluster 分片边界。",
+      "压缩收益通过端到端指标验证。"
+    ]
+  },
+  "dd-index-112": {
+    "title": "声明式实时特征：窗口、迟到和历史回填怎样一起升级？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "Riviera 文章目前只有标题和链接经过索引核验，以下是按“声明式实时特征”主题编写的练习，不是该系统原文摘要。与一般特征 registry 题不同，这题深入流处理运行时：用户写“过去五分钟订单数”时，平台必须明确用事件时间还是处理时间、窗口边界在哪里、晚到数据如何修订，以及结果何时可以被模型读取。",
+      "当定义从五分钟改成十五分钟，已有五分钟状态可能无法恢复更早的十分钟历史；当历史回填与实时流同时更新同一个 key，又可能让旧结果覆盖新结果。好的平台要把定义变更编译成状态迁移、回填切点、验证和路由切换计划，而不是只重新启动一个 Flink job。"
+    ],
+    "prompt": "自编演练：实时特征平台支持“商家过去五分钟订单数”，现在要升级为十五分钟。事件最多常见迟到两分钟，仍可能出现更晚事件；历史 backfill 和实时流会并行。请给出时间语义、state 迁移、回填追平和不中断服务的切换方案。时间数字均为练习假设。",
+    "clarify": [
+      "特征在每个请求时点滚动计算，还是按固定分钟边界物化？固定物化会带来时间粒度误差，需要在契约中说明。",
+      "允许迟到两分钟意味着超过两分钟就丢弃、隔离，还是仍修正历史？这决定状态保留、结果修订与训练重放规则。",
+      "升级必须重用旧状态还是可以旁路运行新作业？双跑消耗更多资源，但通常更易验证并保留可靠回退。"
+    ],
+    "concepts": [
+      {
+        "term": "Event time vs processing time · 事件时间与处理时间",
+        "explanation": "事件时间表示订单实际发生时刻，处理时间表示平台收到并计算时刻。用处理时间计算会把网络延迟变成业务行为变化。"
+      },
+      {
+        "term": "Allowed lateness · 允许迟到范围",
+        "explanation": "窗口初次输出后仍接受修订的一段策略范围。它会增加状态保留与更新次数；超过范围的事件也需要明确的隔离、审计或补正路径。"
+      },
+      {
+        "term": "Cutover frontier · 切换进度边界",
+        "explanation": "新旧链路切换时共同核对的输入覆盖进度，例如各源分区的 offset 和事件时间范围。只比较两个作业都在运行，无法证明新链路已追上所需数据。"
+      },
+      {
+        "term": "State migration · 状态迁移",
+        "explanation": "新定义需要的历史聚合状态可能比旧定义更多，或者格式不兼容。迁移需要重建、补齐或转换，不能假定重启后自然得到正确结果。"
+      }
+    ],
+    "tests": [
+      "能否把声明式窗口翻译为精确的运行时边界、迟到与修订语义。",
+      "能否发现扩窗时旧状态历史不足，并给出可验证的 warm-up 或重建计划。",
+      "能否让回填与实时流在切点和命名空间上隔离，避免覆盖与重复计数。"
+    ],
+    "shortAnswer": "我会把事件时间、窗口区间、物化粒度和迟到策略写进特征契约。五分钟扩成十五分钟会创建新版本，不能直接复用只保留五分钟历史的状态。新作业在独立命名空间构建更长历史，再从确定的输入边界继续消费；回填和实时阶段要有无缝且不重复的覆盖协议。用边界、晚到和重复事件回放验证新结果，确认输入进度与 freshness 达标后，才切换消费新特征的模型版本。旧模型与旧特征继续保留一段时间，保证切回时输入仍可用。",
+    "deepAnswer": [
+      {
+        "title": "把自然语言窗口写成精确定义",
+        "body": "明确某个物化时刻 t 的窗口是 (t−W, t] 还是其他区间，使用哪个时区，以及更新粒度。保留 event_id 去重规则与修订事件处理方式；watermark 用于控制状态推进，不是不可违反的迟到上限。若特征在每分钟边界物化，推理在两次更新之间读取的值可能比连续滚动窗口稍旧，freshness 与模型训练必须覆盖这种语义。"
+      },
+      {
+        "title": "扩窗先补齐状态，不直接套旧 checkpoint",
+        "body": "旧作业若只保留五分钟状态，无法凭空计算十五分钟窗口。可从可重放日志构建足够历史，或使用验证过的状态迁移工具；若选择在线 warm-up，要在至少覆盖新窗口与必要迟到范围后再宣称结果完整。状态结构、算子 UID、key 分区和 schema 的兼容都要检查。双跑更耗资源，但保留旧服务路径并方便对比，通常比冒险原地更改容易证明安全。"
+      },
+      {
+        "title": "回填与实时流使用明确交接边界",
+        "body": "选择每个源分区的交接 offset 或受控快照位置，回填覆盖边界之前的输入，实时阶段从约定位置继续；边界是否包含该条记录必须精确一致。新版本先写独立 namespace，不能让 backfill 写入 v1 的在线 key。若两阶段必须并发合并，要求去重与可合并状态具有明确数学语义，并用稳定 revision 处理迟到修订，不能用墙钟更新时间简单选胜者。"
+      },
+      {
+        "title": "验证的是语义正确与可服务性",
+        "body": "新旧窗口本来不同，不能把数值不相等全部当 bug；应使用离线参考实现检查各自定义，用同一事件集与可见性条件验证新链路。监控输入覆盖进度、被隔离晚到事件、revision 次数、freshness 和错误率，确保新作业追平。模型训练和路由依赖新版本后再灰度，回退仍指向旧模型与旧物化。切换失败时保持旧指针，不暴露半完成状态。"
+      }
+    ],
+    "architecture": "feature spec v2：窗口 / 粒度 / 迟到策略\n  ↓ 编译 + 状态兼容检查\n历史日志 → v2 回填 → 交接 frontier\n                         ↓\nKafka 实时流 → v2 状态 → v2 在线 namespace\n                         ↓ 参考计算 / freshness 验证\n新模型 + v2 特征 ← 受控切换\n旧模型 + v1 特征 ← 保留运行与回退",
+    "calculation": {
+      "problem": "练习假设：在 12:15 物化窗口 (t−W, t]；同一商家三个事件分别发生于 12:02、12:09、12:14，且都已可用。另一个事件发生于 12:13，但到 12:16 才可用。",
+      "steps": [
+        "12:15 的五分钟窗口为 (12:10,12:15]，初始计数为 1；十五分钟窗口为 (12:00,12:15]，初始计数为 3。",
+        "12:16 才到达的事件不能倒过来声称被 12:15 的真实请求看到；若策略允许窗口修订，12:15 的十五分钟窗口在新 revision 中可变为 4。",
+        "训练若重现 12:15 的原始服务输入，应选择当时可见的 revision，值为 3；若使用修订后历史值 4，必须明确它属于另一种数据语义。"
+      ],
+      "conclusion": "迟到时长与 watermark/允许迟到策略不是同一个量。是否接受修订应按明确定义的窗口策略判断，历史修订也不能改写已经发生的线上可见事实。"
+    },
+    "followups": [
+      {
+        "question": "窗口从五分钟扩成十五分钟，等十五分钟再切换就一定安全吗？",
+        "answer": "不一定。除了覆盖十五分钟业务历史，还要考虑启动时消费落后、允许迟到、事件修订和状态初始化边界；等待墙钟十五分钟不代表输入事件时间已推进十五分钟。应该以实际输入覆盖和 watermark、freshness、参考计算一致性作为就绪条件。若使用日志回放构建状态，可以更快追平，但仍需证明回填与实时输入没有遗漏或重复，且模型消费的是正确版本。",
+        "signal": "墙钟等待与状态完整性的区别"
+      },
+      {
+        "question": "为什么不能让回填和实时流都写同一个 key，谁晚写就用谁？",
+        "answer": "写入墙钟顺序不代表业务结果的新旧。一个慢回填任务可能最后写入三小时前的结果，把实时最新值覆盖；相反，实时流也可能尚未包含回填期间的历史状态。应优先隔离 namespace 并在完整验证后切换；若必须合并，需要明确数据覆盖边界、可比较 revision 和原子条件写。对累计计数还要避免同一历史片段被两边重复累加，单靠“最后写入获胜”无法解决。",
+        "signal": "回填隔离与时间语义下的冲突处理"
+      },
+      {
+        "question": "超过允许迟到范围的事件，是不是直接丢掉最好？",
+        "answer": "丢弃可以降低在线状态成本，但必须是显式业务取舍，并记录数量、来源和影响实体。超过范围的事件可进入隔离流用于分析与离线补正；若比例突然升高，应诊断上游延迟，而不是默默当正常噪声。训练要与在线丢弃策略保持可解释的一致性，或明确区分最终事实和历史服务视图。是否需要对在线结果补偿，取决于特征对迟到事件的敏感性和允许的更新成本。",
+        "signal": "迟到数据成本、完整性与训练一致性"
+      },
+      {
+        "question": "新旧窗口的数值必然不同，怎样做 shadow 验证？",
+        "answer": "不要拿新旧数值相等作为门槛。先用一个易审查的离线参考实现，对固定事件集分别计算五分钟与十五分钟结果，检查新链路是否符合新定义。对同一时点可以检查一些适用的不变量，例如在非负计数且同一可见事件集下十五分钟计数不少于五分钟，但这种关系不适用于平均值或含删除的情况。再看 freshness、缺失率和模型输出变化，确认差异来自预期语义而非漏事件或重复计算。",
+        "signal": "语义变更下的正确验证与不变量使用"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "watermark 之前不可能再有事件到达。",
+        "fix": "watermark 是策略性的进度估计，超晚事件仍需处理或隔离路径。"
+      },
+      {
+        "mistake": "修改窗口配置并从旧 checkpoint 启动就完成迁移。",
+        "fix": "先证明旧状态包含新窗口所需历史，或重建并验证新状态。"
+      },
+      {
+        "mistake": "历史修订后的值可以直接代表过去线上看到的值。",
+        "fix": "保留 revision 的可用时间，训练按目标语义选择历史服务视图或最终修订视图。"
+      }
+    ],
+    "bridge": "可以从 Flink 的事件时间、watermark、savepoint 和状态恢复讲起，再补上 ML 消费者的版本绑定。关键增量是：流处理最终正确的修订结果，不一定等于模型在过去预测时刻真实可见的输入；平台需要同时保留这两种解释。",
+    "english": "I would make window boundaries, update granularity, and lateness behavior explicit in the feature contract. Expanding a window requires rebuilding or warming sufficient state; a wall-clock delay alone is not a readiness check. Backfill and live processing would use a defined handoff frontier and an isolated output version. I would validate against a reference computation, then switch a compatible model-feature bundle while retaining the old path.",
+    "exercise": {
+      "task": "画出五分钟到十五分钟的双跑迁移时间线，并按给定四条事件计算初始结果、修订结果和训练应读结果。",
+      "deliverable": "一个包含 event_time、available_at、revision 的结果表，以及交接边界和回退步骤。",
+      "checks": [
+        "12:15 初始五分钟值为 1，十五分钟值为 3；接受迟到修订后十五分钟值为 4。",
+        "重现 12:15 真实输入时仍选择值 3，不能读后来才可用的 revision。",
+        "回填与实时写入隔离或具有明确交接协议，切换前检查输入进度而非仅等待固定时长。"
+      ]
+    },
+    "rubric": [
+      "准确写出窗口边界、物化粒度与迟到策略。",
+      "解释旧状态不一定支持更长窗口。",
+      "回填实时交接没有遗漏或重复的模糊区间。",
+      "区分历史修订值和历史实际可见值。",
+      "使用参考实现与明确就绪条件验证迁移。"
+    ]
+  },
+  "dd-index-156": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "突发事件让模型失效：该回滚、再训练，还是换基线？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：你负责的预测服务没有宕机，接口错误率和 p99 仍正常，但外部环境突然变化，原先好用的模型开始给出偏离现实的结果。问题不是“会不会调用训练脚本”，而是如何确认变化发生在哪里，控制用户损失，并让新模型在可靠证据支持下替换旧模型。本题由再训练这一主题编写；目前只核验了文章标题与索引，没有读取该文章正文。",
+      "后端故障常表现为请求失败，模型故障却可能每次都返回合法数值。例如餐厅备餐时间整体增长，旧模型持续低估到达时间。这可能是真实业务关系改变，也可能是实时特征延迟、发布版本不匹配、或者标签尚未成熟造成的假象。先把这些情况拆开，才能判断扩大训练窗口、缩短窗口、重新加权、降级或回滚哪个有效。"
+    ],
+    "prompt": "自编演练：某城市突发事件后，ETA 平均绝对误差从 3 分钟涨到 6 分钟，HTTP 成功率仍为 99.9%。训练一天一次，送达标签平均 90 分钟后才可使用。你有 2 小时止损、24 小时发布改进，如何处理？数字均为练习假设。",
+    "clarify": [
+      "下降是否集中在受影响城市、餐厅类型或订单时段？如果全站平均恶化只来自流量占比变化，先校正比较口径，不能直接认定模型失效。",
+      "有没有同期模型、特征处理或数据采集发布？有发布相关性时先做同请求重放和版本对照；如果各版本都在相同切片恶化，才更支持外部关系变化。",
+      "哪些预测具有用户损失，什么降级方案可接受？对低估 ETA 更敏感时，可以先使用保守区间或可解释基线，但需要同时监控过度高估造成的转化损失。"
+    ],
+    "concepts": [
+      {
+        "term": "Data drift · 输入分布变化",
+        "explanation": "模型接收到的人群或特征占比变了。例如远距离订单更多；这能让总体误差变差，但不证明同一类订单上的模型关系已经变化。"
+      },
+      {
+        "term": "Concept drift · 条件关系变化",
+        "explanation": "在相近输入条件下，真实结果变了。例如同样距离、商家和时段，新的交通限制让送达变慢。需要成熟标签与合理切片才能验证。"
+      },
+      {
+        "term": "Label maturity · 标签成熟",
+        "explanation": "一次预测的真实结果需要等送达、事件上报及清洗后才可靠可用。最近 10 分钟的预测不能和昨天已完成订单直接比较误差。"
+      },
+      {
+        "term": "Training-serving skew · 训练与服务偏差",
+        "explanation": "训练和线上并没有使用相同含义的输入，例如线上缺失值被填 0，训练却填中位数。再训练不会自动修复这类接口错误。"
+      }
+    ],
+    "tests": [
+      "故障归因：能把数据缺陷、群体组成变化、概念变化与标签延迟分开，并为每个假设提出可证伪的检查。",
+      "生产决策：先提出可恢复的止损策略，再讨论训练；知道旧版本也可能同样不适应新环境。",
+      "评估可信度：使用预测时可见特征、时间切分和成熟标签，避免用未来数据证明新模型很好。"
+    ],
+    "shortAnswer": "我先冻结非必要发布，按城市、商家和模型版本比较成熟订单，确认不是标签延迟或流量占比造成的假象，再检查特征新鲜度和训练服务一致性。止损用受影响切片的保守基线或区间，同时保留原模型作对照；只有发布回归才优先回滚。随后用事发后的已成熟样本训练候选模型，保留历史样本防止过拟合短期噪声，按时间切分评估新旧场景。发布前做影子验证，再小流量验证误差、低估尾部和服务指标；所有阈值与退出条件预先写清。",
+    "deepAnswer": [
+      {
+        "title": "建立按预测时间对齐的证据表",
+        "body": "日志记录 prediction_id、预测时间、模型/特征版本、地区、预测值与降级路径。标签到达后按 prediction_id 连接，只比较已经过成熟窗口的预测群组。先看各切片误差，再看总体误差；同时检查缺失率、特征年龄和事件消费延迟。若受影响地区特征突然全为默认值，先修复数据链路，不要拿错误输入训练一个“适应故障”的模型。"
+      },
+      {
+        "title": "止损动作必须对应假设",
+        "body": "如果新发布版本独有回归，回滚模型及其配套特征配置。如果旧版本在新环境中也失效，盲目回滚没有意义；可以针对受影响地区使用最近成熟订单的稳健统计基线，或扩大预测区间。基线同样要限定样本量、有效期和回退路径。保守并非免费：过度高估也会改变用户行为，应保留转化与取消护栏。"
+      },
+      {
+        "title": "构建能代表未来的训练与评估集",
+        "body": "按时间顺序划分训练、验证和最近的独立测试窗口。所有特征只能使用预测发生且当时已可见的数据，迟到信息不能回填进历史样本。新数据太少时，混合旧数据并按地区或时间加权，比较稳定基线与候选模型，而不是先承诺某个复杂算法。对罕见受影响切片报告样本量和不确定性，避免整体收益掩盖最受影响的用户。"
+      },
+      {
+        "title": "把再训练做成有门槛的发布闭环",
+        "body": "训练产物绑定数据快照、特征代码和评估报告。影子流量验证输入兼容、延迟与预测分布，但不能证明用户收益；再做小范围受控流量验证。短期发布护栏包括失败率、资源占用与异常预测，成熟后检查误差及业务结果。让自动化生成候选模型可以很快，但不能把“监测到 drift”直接等同于“自动替换线上版本”。"
+      }
+    ],
+    "architecture": "预测日志 + 特征快照 → 成熟标签连接\n              ↓\n按地区/时间/版本诊断 → 数据修复或限域降级\n              ↓\n版本化数据 → 训练候选 → 时间切分评估\n              ↓\n影子验证 → 小流量实验 → 扩量 / 退出",
+    "calculation": {
+      "problem": "练习假设：城市 A 的 MAE 一直为 2 分钟，城市 B 一直为 6 分钟。以前流量 A/B 为 80%/20%，事件后变成 50%/50%。总体 MAE 上升是否证明 concept drift？",
+      "steps": [
+        "原总体 MAE = 0.8 × 2 + 0.2 × 6 = 2.8 分钟。",
+        "新总体 MAE = 0.5 × 2 + 0.5 × 6 = 4.0 分钟。",
+        "固定旧流量权重比较新时期切片误差，仍得到 2.8 分钟；各城市条件内表现没有在这个例子中恶化。"
+      ],
+      "conclusion": "总体体验确实变差，但该例仅证明流量组成改变，不能单凭总体指标断言输入到标签的关系改变。还需要更细粒度分组，防止城市内部组成变化被掩盖。"
+    },
+    "followups": [
+      {
+        "question": "标签要等 90 分钟，前 10 分钟如何决定是否降级？",
+        "answer": "先依靠不需要标签的确定性检查：输入 schema、缺失率、特征年龄、预测范围、线上与离线同请求计算差异，以及发布前后的版本对照。对于真实外部冲击，可结合运营事件和受影响范围采取有时限的小范围保守策略，但必须把它标成风险控制决策，不宣称已经证明模型误差恶化。标签成熟后再校正策略，监控降级是否扩大用户损失。",
+        "signal": "区分领先信号与效果证据，能在信息不完整时做可逆决策。"
+      },
+      {
+        "question": "既然环境变了，为什么不只用最近一天的数据训练？",
+        "answer": "最近数据更贴近新环境，但样本可能不足、标签不全，并且容易丢失周末、低频商家等模式。如果冲击只影响一个城市，丢弃全量历史还会伤害正常地区。应比较不同时间窗口与加权方案，在按时间留出的新场景和历史稳定切片上同时评估；可先限域更新或使用校准层，但这种方法也要验证变化是否能被简单校正覆盖。",
+        "signal": "理解新鲜度、方差、覆盖度和灾难性遗忘之间的取舍。"
+      },
+      {
+        "question": "再训练完成后，离线 MAE 降了就可以全量上线吗？",
+        "answer": "不可以。离线评估先排查时间泄漏、被取消订单的选择偏差和切片退化，然后验证产物与特征版本兼容。影子验证可以发现异常输出或资源回归，却看不到新预测对用户行为的影响。小流量上线后要等待成熟标签，并检查低估长尾、转化、取消及服务 p99。若主要收益来自少数常见城市，不能用总体均值覆盖受影响地区的恶化。",
+        "signal": "知道离线有效、线上兼容与业务有效是三个不同门槛。"
+      },
+      {
+        "question": "事件过去后模型又变差，怎么办？",
+        "answer": "在发布时就给事件策略设置到期复核，并持续保留正常时期基线的对照评估。外部关系恢复后，事件期间的强时间权重可能成为负担，可以重新调整窗口、回到稳定模型或训练覆盖恢复期的数据。不能只依赖日历判断恢复，应检查成熟标签、特征分布和切片表现。所有回切仍绑定版本并小流量验证，避免把模型切换变成另一轮突发故障。",
+        "signal": "把模型适应视为持续过程，而不是一次性救火。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“drift 告警一响就自动训练并发布。”",
+        "fix": "告警先触发诊断和候选训练；数据错误、标签缺失和真实关系变化需要不同修复，发布必须经过独立评估门槛。"
+      },
+      {
+        "mistake": "“HTTP 都是 200，所以不是线上事故。”",
+        "fix": "将预测质量、特征可用性和成熟标签后的业务误差作为服务正确性的一部分。"
+      },
+      {
+        "mistake": "“回滚一定更安全。”",
+        "fix": "只有已知发布回归适合直接回滚；外部环境改变时旧版本可能同样失效，需要验证基线和限域降级。"
+      }
+    ],
+    "bridge": "可把 Kafka lag、Flink watermark、默认值和回放诊断用于排除输入链路问题；新增的 ML 思维是等标签成熟后评估条件误差，并区分分布组成变化与预测关系变化。面试中用你真实做过的事故诊断方法说明排查顺序，模型收益数据没有实际经历就不要编造。",
+    "english": "I would first separate a data pipeline incident from a genuine change in the prediction problem. I would compare mature labels by region and model version, then introduce a reversible fallback for the affected segment. Retraining would use time-correct features and a temporal holdout. A drift alert can trigger investigation, but it should not automatically authorize deployment.",
+    "exercise": {
+      "task": "用纸笔或 Python 构造两个城市、事件前后各 100 条订单，先复现例子中的流量组成变化，再把 B 城市 MAE 改为 8，写出两次不同的处置建议。",
+      "deliverable": "一张按城市分组的误差表、一张固定权重对比表，以及 5 条止损/发布检查。",
+      "checks": [
+        "第一次总体 MAE 从 2.8 变为 4.0，但固定旧权重仍为 2.8。",
+        "第二次新总体 MAE 为 5.0，固定旧权重为 3.2，能说明 B 的条件表现进一步下降。",
+        "处置清单同时包含标签成熟窗口、数据链路检查、限域退出条件，不能只有“再训练”。"
+      ]
+    },
+    "rubric": [
+      "说出 data drift、concept drift 与 skew 的区别，并各给一个证据。",
+      "能解释 2.8→4.0 的算例为什么不能直接归因为模型关系变化。",
+      "止损策略有作用范围、到期时间、可回退版本。",
+      "训练样本按预测时可见信息构建，评估按时间切分。",
+      "发布同时检查切片质量、业务行为与服务可靠性。"
+    ]
+  },
+  "dd-index-263": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "设计餐厅推荐：从候选召回到低延迟排序的完整链路",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：打开外卖首页时，系统必须从大量餐厅里挑出用户可能想点、现在能配送、并且整体体验合理的一小批结果。直接让大模型给每家餐厅打分通常太慢，所以要先用便宜的办法缩小候选，再对少量候选使用更丰富的特征排序。这里是根据搜索与推荐主题编写的面试演练，不是对未读取文章正文的复述。",
+      "这道题的 ML Infra 部分在于把数据、特征、推理和业务约束连起来：训练看到哪些曝光与结果，线上怎样批量读特征，模型服务按什么单位估算吞吐，商家关闭或下游超时后如何保持结果可用。推荐质量和服务可靠性不能分开设计，因为超时降级本身会改变展示和后续训练数据。"
+    ],
+    "prompt": "自编设计题：设计外卖首页商家推荐。练习假设峰值 20K 请求/秒，每次最多召回 200 家，返回 20 家，端到端延迟目标 p99 低于 150ms；商家营业状态更新需在秒级生效。说明训练数据、特征、serving、容量和降级。",
+    "clarify": [
+      "优化下单率、长期留存还是每单收益？选一个主目标和取消率/配送体验等护栏，避免把“点击更多”当作最终成功。",
+      "候选可配送范围和营业状态由谁权威维护？若状态要求秒级生效，应有在线过滤或最终校验，不能只依赖昨晚的向量索引。",
+      "20K QPS 是用户请求还是单个候选的推理调用？两者相差候选数倍，且目标包含网关、特征读取和排序全链路。"
+    ],
+    "concepts": [
+      {
+        "term": "Candidate retrieval · 候选召回",
+        "explanation": "用地理范围、热门列表、历史偏好或向量检索快速找到可能相关的餐厅。召回漏掉的好结果，后续排序再准确也救不回来。"
+      },
+      {
+        "term": "Ranking / re-ranking · 排序与重排",
+        "explanation": "排序模型对候选预测相关结果；重排还处理多样性、重复、业务约束等。模型分数与最终展示顺序可能不同，日志必须保留两者。"
+      },
+      {
+        "term": "Exposure logging · 曝光记录",
+        "explanation": "记录用户实际有机会看到的结果、位置和版本。没有曝光就不能简单把“没下单的商家”当成负样本；用户根本可能没见过它。"
+      },
+      {
+        "term": "Feature fan-out · 特征读取扇出",
+        "explanation": "一条请求需要很多候选特征。逐候选远程读会产生大量 RPC 与尾延迟，通常要批量请求、共用用户特征并缓存稳定部分。"
+      }
+    ],
+    "tests": [
+      "能从用户目标推到训练标签、线上路径与评估，而不是只画一个模型方框。",
+      "容量以候选打分量计算，并知道 batch、并发、模型大小共同决定服务能力。",
+      "将营业状态、超时和降级作为正常路径的一部分，说明如何记录并监控。"
+    ],
+    "shortAnswer": "我会先约定主目标和配送体验护栏，把推荐拆成候选召回、有效性过滤、批量特征读取、排序和重排。离线训练用实际曝光连接成熟订单结果，保留位置与模型版本，避免把未展示商家当成负样本。线上用户特征只读一次，候选特征批量读取，排序按每秒候选量压测而不是只看请求 QPS。营业状态用在线权威数据检查，召回或排序超时时返回预计算的地域热门列表。模型、特征和索引版本一起追踪，影子与小流量实验分别验证兼容性能和真实收益。",
+    "deepAnswer": [
+      {
+        "title": "先定义可训练、可验证的目标",
+        "body": "可以先预测一次曝光后的下单概率，但要定义曝光、归因窗口、取消订单处理和延迟标签。训练日志保存请求、用户匿名标识、候选、位置、特征/模型版本和最终展示。历史排序决定谁会获得曝光，因此观察到的点击不能当作完全无偏偏好；第一版至少记录位置，使用时间切分评估，并讨论探索流量或位置偏差处理，不必假装离线分数等于因果收益。"
+      },
+      {
+        "title": "多阶段流程控制计算量",
+        "body": "召回可以并行使用地域热门、历史偏好和语义向量通道，再去重并控制总候选数。首先排除明显不可配送候选，精排前批量读取用户、商家和上下文特征，计算模型分数，最后处理多样性与实时可售性。模型输入 schema 固定，缺失值有训练一致的处理。重要业务硬约束应在结果输出前确认，不能寄希望于模型自动学会“关闭的商家不能展示”。"
+      },
+      {
+        "title": "分配 deadline 并压测端到端链路",
+        "body": "150ms 是整个请求的目标。可以为召回、特征、排序等分配工程时间预算并传播剩余 deadline，但不能把每个组件的 p99 相加说成端到端 p99。用真实候选数、冷热 key、突发流量和下游慢请求压测，关注 candidate/s、队列年龄、batch 大小分布和降级比例。热门用户或商家也可能造成特征缓存热点，需要批量读取、有限并发与隔离。"
+      },
+      {
+        "title": "降级和版本发布决定生产可用性",
+        "body": "召回部分失败时使用已返回候选；排序预算耗尽时使用简单排序或预计算热门列表，且仍执行有效性过滤。降级日志带原因和版本，避免后续训练把降级排序的结果误认成新模型行为。发布模型时校验特征 schema、缓存键与索引依赖，并保留兼容旧版本。影子先验证资源和输出差异，再由受控实验验证真实下单与配送护栏。"
+      }
+    ],
+    "architecture": "曝光/订单事件 → 时间正确训练集 → 模型注册表\n用户请求 → 多路召回 → 去重/可配送过滤\n                    ↓\n用户特征 + 批量商家特征 → 排序服务\n                    ↓\n多样性重排 + 营业状态校验 → 展示/曝光日志\n任一步超时 → 地域热门基线 + 同样有效性检查",
+    "calculation": {
+      "problem": "练习假设：20K 请求/秒，每次精排 200 候选。某候选模型在目标延迟约束下，单副本压测吞吐为 50K 候选/秒，计划负载不超过该值的 60%。",
+      "steps": [
+        "候选工作量 = 20,000 × 200 = 4,000,000 候选/秒。",
+        "目标单副本承载 = 50,000 × 0.6 = 30,000 候选/秒。",
+        "副本下界 = ceil(4,000,000 / 30,000) = 134 个；还未计故障域冗余和特征读取容量。",
+        "把候选量从 200 降到 100 可近似减半打分工作量，但需验证召回质量与最终业务损失。"
+      ],
+      "conclusion": "只按 20K 用户 QPS 估算模型实例可能少算两个数量级。这是基于给定压测条件的容量估算，真实吞吐还会随 batch、特征大小与模型版本变化，不能把 50K 当成通用硬件常数。"
+    },
+    "followups": [
+      {
+        "question": "新商家没有点击历史，怎么避免一直没有曝光？",
+        "answer": "先用城市、品类、价格、配送半径等内容特征与地域基线给它候选资格，再为受控探索分配小比例曝光；不能把“历史点击为零”直接理解为“不受欢迎”。探索要设置用户体验护栏，并把探索策略、展示概率或至少探索标签记录下来，便于后续分析选择偏差。新商家实时可售性与履约能力仍是硬约束，探索不能绕过这些检查。",
+        "signal": "理解冷启动与反馈循环，同时保留服务安全边界。"
+      },
+      {
+        "question": "精排模型很好，但下单率没有改善，先查什么？",
+        "answer": "先看召回是否包含有用候选、重排是否覆盖了模型排序、以及线上是否大量降级。再核对训练与在线特征、候选分布、延迟和实验曝光是否正确。离线指标也可能优化了点击而非下单，或者受到位置偏差。用分阶段漏斗与切片定位，不要只更换算法；若线上多样性约束导致排名变化，应分别记录模型原始分数和最终位置。",
+        "signal": "能诊断整个决策链，而不是把一切归于模型。"
+      },
+      {
+        "question": "模型服务变慢时，能否只把请求重试到另一个副本？",
+        "answer": "盲目重试会把原来的过载放大。先传播 deadline，限制队列长度和排队年龄，在剩余预算不足时直接走基线；只对幂等、瞬时故障且仍有预算的调用做有限重试，并施加重试预算。可减少候选数或切换轻量模型，但要记录降级原因和质量影响。扩容有模型加载与预热时间，所以有界队列和备用容量要先于临时加机器。",
+        "signal": "将分布式系统过载控制迁移到模型推理。"
+      },
+      {
+        "question": "营业状态每秒变化，为什么不每秒重建向量索引？",
+        "answer": "向量描述长期语义或偏好，营业状态属于快速变化的可售性，两者更新节奏不同。让索引提供候选，再通过在线状态层过滤更经济；过滤导致候选不足时可超额召回或补地域基线，但要控制总延迟。对于已经下架或需要立即移除的对象，可维护 tombstone 或覆盖过滤层。监控过滤后不足率，不能只看索引命中率。",
+        "signal": "区分慢特征、快状态和用户可见正确性。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“20K QPS，所以按 20K 次模型推理估容量。”",
+        "fix": "明确模型接口是否一次输入整批候选，容量统一到候选/秒、请求/秒与 batch 分布。"
+      },
+      {
+        "mistake": "“把所有没点击的餐厅当负样本。”",
+        "fix": "首先确认有曝光机会与观察窗口，并讨论位置、选择偏差。"
+      },
+      {
+        "mistake": "“模型返回后就能直接展示。”",
+        "fix": "在最终输出前保留可配送、营业与必要业务约束，模型分数不能替代硬校验。"
+      }
+    ],
+    "bridge": "你的高并发、缓存和 RPC 经验可用于候选扇出、deadline、热点保护与降级。需要补的 ML 部分是曝光到标签的训练闭环、历史策略带来的样本偏差，以及候选质量与排序质量的独立评估。用真实后端经验讲工程机制，再说明这些新约束如何改变设计。",
+    "english": "I would separate retrieval, feature hydration, ranking, and final eligibility checks. Capacity should be measured in candidates scored per second, not just user requests. I would train from actual exposures with mature outcomes and record both model scores and final positions. If ranking misses its deadline, I would return an eligible regional baseline and log the fallback explicitly.",
+    "exercise": {
+      "task": "画出 150ms 目标下的推荐请求时序，在特征服务超时和商家临时关闭两处注入故障；计算给定流量的模型容量。",
+      "deliverable": "一张包含训练反馈的架构图、一张 deadline/降级表、一页容量计算。",
+      "checks": [
+        "容量算到 4M 候选/秒与至少 134 个给定性能副本。",
+        "两条故障路径都返回仍然满足可配送/营业约束的结果，并记录降级。",
+        "区分组件工程预算与真实端到端 p99，提出一次混合冷热流量的压测。"
+      ]
+    },
+    "rubric": [
+      "先澄清主目标与履约护栏。",
+      "训练数据以实际曝光和成熟结果连接。",
+      "分清召回、排序、重排和硬过滤的责任。",
+      "算出 candidate/s 并覆盖批量特征读取。",
+      "描述超时、版本兼容、降级以及线上实验闭环。"
+    ]
+  },
+  "dd-index-300": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "设计混合搜索：关键词搜不到时，如何补语义召回而不乱匹配？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：用户输入的是意图，不总是菜单上的原始字符串。“深夜吃点清淡的”可能没有对应商品名称，而精确品牌名又不能被宽泛语义相似度随意替换。你要设计一个搜索系统，同时处理字面匹配、实体与语义召回，并在固定延迟和候选预算内保证相关性。这是按文章标题涉及的搜索意图主题自编的练习，未声称读取原文。",
+      "核心不是选一种向量数据库就结束，而是决定哪些信息走精确约束、哪些允许语义扩展，以及如何证明召回变好了。两种“recall”也要分清：ANN recall 比较近似检索与精确向量近邻；业务召回率比较系统找回了多少真正相关、可配送的结果。近似算法找得再准，如果 embedding 不理解用户意思，业务仍然失败。"
+    ],
+    "prompt": "自编设计题：搜索服务峰值 8K 请求/秒，p99 目标 120ms；现有关键词检索对长尾口语查询经常无结果。加入语义召回后，品牌精确查询却开始出现不相关商家。如何设计、评估和上线混合检索？数值均为练习假设。",
+    "clarify": [
+      "查询主要是商家品牌、菜名，还是口语偏好？如果品牌实体匹配高度可信，可以提高精确通道优先级；模糊意图才更依赖扩展。",
+      "有无人工相关性集合、真实查询日志和无结果查询切片？没有评估集时，先采样标注并留出冷门查询，不能只用点击日志证明语义理解。",
+      "可配送范围、营业状态和预算限制是硬条件还是偏好？硬条件必须在检索/过滤链路明确执行，不能靠向量相似度“顺便满足”。"
+    ],
+    "concepts": [
+      {
+        "term": "Lexical retrieval · 词法召回",
+        "explanation": "按词项、短语或结构化实体找到结果，擅长精确名称与稀有关键词；对同义表达和长句意图可能漏召回。"
+      },
+      {
+        "term": "Semantic retrieval · 语义召回",
+        "explanation": "把查询与对象编码为向量，按相似度寻找语义接近结果。相似不等于满足所有限制，尤其要保留精确实体与硬过滤。"
+      },
+      {
+        "term": "Hybrid fusion · 混合合并",
+        "explanation": "把多个召回通道的候选去重并合并。不同模型的原始分数不一定可直接相加，可以先采用基于排名的合并，再训练或校准排序。"
+      },
+      {
+        "term": "Recall@K · 前 K 候选召回率",
+        "explanation": "相关结果集合中，有多少进入最终 K 个候选。分母是评估集中的相关对象，不是返回了多少对象；不同 K 的结果不能不加说明地比较。"
+      }
+    ],
+    "tests": [
+      "能给精确约束、语义扩展和排序清楚分工，防止语义模型破坏确定性需求。",
+      "能用有标注的评估集区分 ANN 精度、语义相关性和最终业务效果。",
+      "能在双路检索失败、模型超时和长尾新查询情况下给出可用结果。"
+    ],
+    "shortAnswer": "我会保留词法和实体通道，新增并行语义通道，而不是直接替换。先识别高置信品牌与硬过滤条件，再把两路候选去重、限制总量并重排；不同通道原始分数不直接相加。离线评估按品牌、菜名、口语和低频查询切片，分别看相关性召回与精确实体退化，再单独测 ANN 对精确近邻的损失。线上查询编码设 deadline，超时退回词法结果，缓存键包含地区、语言和模型版本。影子检查性能，受控实验检验无结果率、下单和不相关结果护栏。",
+    "deepAnswer": [
+      {
+        "title": "查询理解只承担能验证的责任",
+        "body": "对文本做受控规范化，保留语言、地区、品牌实体和明确过滤条件。拼写纠正或同义词扩展需要限制置信度，避免把一个品牌改成另一个。对于“不要辣”等语义限制，只有存在可靠结构化属性时才可当硬过滤；属性缺失时不能承诺模型能保证。版本化查询处理规则，使离线重放与线上服务使用相同逻辑。"
+      },
+      {
+        "title": "并行召回并控制合并预算",
+        "body": "词法通道保证精确词项，向量通道弥补意图表达差异，两者共享地理与有效性条件。每路给候选预算，合并按对象 ID 去重。先用明确、可解释的融合方式作为基线，例如保留精确品牌配额并按排名合并；后续排序模型可以使用来源标记与各通道分数。直接相加原始分数可能让数值范围更大的通道统治结果。"
+      },
+      {
+        "title": "用三层评估定位检索损失",
+        "body": "第一层在相同 embedding 上比较 ANN 与精确向量搜索，测近似索引损失。第二层用人工标注的相关结果测混合候选的 Recall@K 与排序质量，按品牌、语言、头部/长尾查询切片。第三层通过受控线上实验观察搜索转化、无结果率和不相关反馈。离线相关性提升可能增加计算量或改变候选构成，不能直接推导线上收益。"
+      },
+      {
+        "title": "服务退化应保护最可靠的结果",
+        "body": "查询编码与两路召回使用可传播的 deadline，语义通道变慢时保留词法结果；不为补齐候选无限等待。缓存 query embedding 时绑定规范化规则与模型版本，缓存最终候选还要包含地区等影响有效性的上下文，并执行实时过滤。预热高频查询可降成本，但必须单独看冷查询 p99，否则缓存高命中会掩盖最需要语义召回的长尾请求。"
+      }
+    ],
+    "architecture": "查询 → 规范化/实体/约束解析\n         ├→ 词法/品牌召回 ──┐\n         └→ query embedding → ANN ─┤\n                               ↓\n              去重/候选配额 → 重排\n                               ↓\n                    有效性过滤 → 结果\n语义超时 → 保留词法结果并记录原因",
+    "calculation": {
+      "problem": "练习假设：某查询共有 10 个已标注相关商家。词法候选找到 6 个，语义候选找到 7 个，两者相关结果重合 4 个；合并后又受候选预算裁剪。",
+      "steps": [
+        "词法相关召回率 = 6/10 = 60%；语义相关召回率 = 7/10 = 70%。",
+        "未裁剪的并集相关结果 = 6 + 7 − 4 = 9 个，对这个查询召回率为 90%。",
+        "如果排序截断又丢了 2 个相关结果，最终候选召回率为 7/10 = 70%，不是 90%。",
+        "这组数字只说明这一条查询；整体应在固定 K、固定标注口径下汇总，并分别观察品牌和长尾切片。"
+      ],
+      "conclusion": "多路召回的收益可能在去重、配额或排序截断时丢失。不能把两路召回率直接相加，也不能用扩大的候选数量制造“同预算下更好”的结论。"
+    },
+    "followups": [
+      {
+        "question": "为什么不把所有查询都交给大语言模型改写？",
+        "answer": "大模型改写可能增加延迟、成本和不确定性，也可能改掉品牌或用户的否定约束。先用词法、受控同义词和小型查询模型建立基线；只有特定长尾切片有可验证收益时，再考虑有限触发或离线生成扩展。改写必须保存原查询并可回退，给出超时与缓存策略，同时用精确实体、否定和多语言反例验证，不应只展示几个成功样例。",
+        "signal": "能按收益和生产成本选择模型，而非默认最复杂方案。"
+      },
+      {
+        "question": "ANN recall 已经 99%，为什么用户仍说结果不相关？",
+        "answer": "99% 通常表示 ANN 找回了同一 embedding 空间中精确算法选出的近邻，说明索引近似误差小，不说明向量空间表达了真实意图。应检查 query/item 编码兼容性、训练样本覆盖、相关性标注和下游过滤；品牌精确查询尤其可能在语义空间中被泛化。继续加大 ANN 搜索参数可能只增加延迟，而不改变 embedding 的语义错误。",
+        "signal": "区分检索算法正确性与任务相关性。"
+      },
+      {
+        "question": "两个通道的分数范围不同，怎么融合？",
+        "answer": "先不要把原始分数线性相加。可以使用按名次的融合，或设明确通道配额并用统一重排模型再评分；前者简单且便于诊断，但忽略分数差距，后者更灵活但需要训练数据和版本管理。若使用校准分数，要在目标查询切片上验证可比性，并监控模型更新后的分布变化。无论哪种方法，都应保留候选来源供离线归因。",
+        "signal": "意识到跨模型分数没有天然统一尺度。"
+      },
+      {
+        "question": "一批新商家刚上线，没有向量，搜索如何工作？",
+        "answer": "先让新商家进入结构化和词法索引，用名称、品类等内容检索提供基本可发现性，再异步生成向量并记录未完成状态。增量索引完成前保留新对象覆盖通道；模型版本不同的向量不能直接混入同一空间。监控从对象创建到可检索的时延，而不只是向量任务成功率，最终输出仍检查营业与配送状态。",
+        "signal": "能设计数据新鲜度和冷启动期间的明确服务语义。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“向量相似就满足用户所有条件。”",
+        "fix": "把精确实体和可验证硬条件单独处理，语义相似只提供相关性信号。"
+      },
+      {
+        "mistake": "“词法 60% 加语义 70%，总召回 130%。”",
+        "fix": "按相关对象去重计算并集，并测预算截断后的最终召回。"
+      },
+      {
+        "mistake": "“平均延迟很好，所以长尾查询没问题。”",
+        "fix": "单独压测冷查询、查询编码失败与索引缓存未命中的尾延迟。"
+      }
+    ],
+    "bridge": "Kafka/Flink 可负责新商家内容和索引更新，Redis 可缓存版本化 query embedding，Go RPC 的超时控制适用于双通道并行检索。新增知识是两个不同含义的 recall、跨模型分数不可直接比较，以及用人工相关性集合定位语义损失。",
+    "english": "I would keep lexical retrieval as a reliable baseline and add semantic retrieval in parallel. Exact entities and hard eligibility constraints should remain explicit. I would distinguish ANN recall from relevance recall, then evaluate the final candidate set after fusion and truncation. If query encoding times out, the request should still return valid lexical results.",
+    "exercise": {
+      "task": "构造 12 条查询：品牌、菜名、口语、多语言各 3 条；手工标出相关商家，用两组候选列表模拟合并、去重和截断。",
+      "deliverable": "逐查询相关性表、合并前后 Recall@K、至少两个语义误匹配反例。",
+      "checks": [
+        "对算例正确算出并集 9 个相关对象、截断后 7 个。",
+        "至少一个品牌查询在加入语义通道后不退化，并解释如何保护。",
+        "明确写出语义编码超时的词法回退与地区/模型版本缓存键。"
+      ]
+    },
+    "rubric": [
+      "能够用自己的话区分词法、语义与硬约束。",
+      "有固定 K 的人工相关性评估，而非只展示结果截图。",
+      "解释 ANN recall 与任务相关性的不同。",
+      "融合考虑去重、配额和分数尺度。",
+      "给出冷查询、增量索引和语义失败时的服务路径。"
+    ]
+  },
+  "dd-index-329": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "升级 embedding 模型：如何让查询向量、商家向量和 ANN 索引一起安全切换？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：推荐服务用向量表达用户偏好和商家特征，并在索引里搜索相似对象。你训练了一个更好的 embedding 模型，但线上不能把新用户向量随意送进旧商家索引。即使向量维度没变，坐标空间也可能完全不同。这道题按向量个性化主题编写，引用索引只用于说明研究方向，不代表读取了原文或知道内部实现。",
+      "对后端工程师，可以把它理解为一个比普通 schema 更强的版本兼容协议：不只是字段数量一致，还要求两边的数值含义一致。发布单位往往应包含用户/查询编码器、对象编码器、预处理、距离度量、索引 generation 和路由。错误组合可能返回看起来正常的 ID，却系统性地把不相关对象排到前面。"
+    ],
+    "prompt": "自编设计题：商家向量索引有 1000 万条 128 维 float32 向量，查询编码模型从 v1 升到 v2，维度不变。需要不中断服务、可回滚，并允许索引构建期间继续写入商家更新。设计完整发布流程。所有规模为练习假设。",
+    "clarify": [
+      "用户/查询与商家编码器是否成对训练，是否承诺跨版本兼容？默认没有兼容保证；除非测试和训练契约证明，否则要发布成套版本。",
+      "索引构建要多久，更新流能否重放、有无删除事件？如果无法记录构建期间的增量，就可能切到缺少新商家或复活删除对象的索引。",
+      "是否有足够资源同时保留两代索引与编码服务？资源不够时需分片逐步建设，但每个请求仍必须绑定一个完整、可用的 generation。"
+    ],
+    "concepts": [
+      {
+        "term": "Embedding space · 向量空间",
+        "explanation": "向量的每个坐标是模型学出的表示，单个维度没有跨模型天然固定含义；维度相同只保证计算形状一致，不保证相似度有意义。"
+      },
+      {
+        "term": "Index generation · 索引代次",
+        "explanation": "一次可识别、可验证的索引版本，绑定数据快照、编码模型、距离度量和构建参数。它相当于可发布的数据产物。"
+      },
+      {
+        "term": "Atomic routing · 原子路由切换",
+        "explanation": "一次请求读取一个版本化发布配置，并始终把对应查询编码器与索引配对。全局可以渐进切流，但单个请求不能混用配置。"
+      },
+      {
+        "term": "Snapshot plus delta · 快照加增量",
+        "explanation": "从某个一致快照构建全量索引，同时消费快照之后的变更；切换前追平更新并正确应用删除，减少全量构建期间的数据缺口。"
+      }
+    ],
+    "tests": [
+      "理解向量的语义兼容性，不能只验证维度和接口类型。",
+      "能把大数据产物发布做成可验证、可回退、可追踪的版本事务。",
+      "能量化双代共存成本，并处理增量更新、删除和缓存污染。"
+    ],
+    "shortAnswer": "我会把查询编码器、商家编码器、预处理、相似度度量和索引代次绑定为一个发布清单，单请求读取一次清单，避免新查询打到旧索引。v2 先用版本化快照离线重建，再从快照水位追平商家变更与删除；完成覆盖率、向量合法性、相关性和性能检查后预热。双代共存期间按稳定流量分桶切换，缓存键也带模型及索引代次。出现质量或服务回归就把路由切回 v1，但必须确保 v1 仍接收增量、未被过早回收。",
+    "deepAnswer": [
+      {
+        "title": "先写兼容清单，不靠隐含约定",
+        "body": "清单包含 query encoder、item encoder、tokenizer/预处理、维度、归一化方式、距离度量、索引 generation 和数据水位。服务把清单 ID 记录到请求日志，验证编码输出与索引契约一致。新旧维度相同并不意味着可以混用；距离从点积改成余弦时，归一化和阈值也需要一起验证。若训练设计确实支持跨版本兼容，应把兼容矩阵与测试作为明确产物。"
+      },
+      {
+        "title": "用快照与增量构建可切换数据产物",
+        "body": "记录全量快照对应的变更水位，从快照编码并构建索引，同时缓冲或持续应用其后的 upsert/delete。事件有对象版本或序列号，旧事件不能覆盖新状态；删除 tombstone 必须覆盖快照中的对象，避免对象复活。切换前检查对象覆盖率、增量 lag 与查询结果，达到预定可接受的新鲜度再让新 generation 接流量。"
+      },
+      {
+        "title": "验证从数学形状到用户相关性",
+        "body": "先检查 NaN、零向量、维度和范数等基本合法性，再用精确向量搜索评估 ANN 近似损失，用相关性集合评估语义效果。用影子查询比较候选覆盖、空结果、过滤后不足和延迟，但影子不证明真实点击收益。还要压测热索引、冷页、批量增量更新同时发生时的尾延迟，避免仅在静态已预热数据上选配置。"
+      },
+      {
+        "title": "路由、缓存和回滚要遵循同一代次",
+        "body": "灰度路由先决定 release ID，再调用它对应的编码器与索引；不要让两个下游分别独立选“最新版本”。缓存用户向量、查询结果、候选列表时绑定相应版本，旧向量不能被新服务误用。回滚窗口内旧代持续接收必要增量并保留资源，否则路由回切只会回到陈旧数据。确认新代稳定后再停止旧代更新和回收，回收动作与业务发布分开。"
+      }
+    ],
+    "architecture": "模型/预处理/距离度量 → release manifest\n商家快照 → v2 item encoder → index g2\n商家变更流 ───────────→ 增量追平/删除\n                                  ↓\n请求 → 固定 release ID → 匹配 query encoder\n                                  ↓\n                      同代索引 → 候选/日志\nv1 + g1 保留并更新 ← 路由可回切",
+    "calculation": {
+      "problem": "练习假设：1000 万商家，128 维 float32，每个浮点数 4 字节。发布期间两代索引共存，每代两份副本。",
+      "steps": [
+        "单代原始向量字节 = 10,000,000 × 128 × 4 = 5,120,000,000 bytes，即 5.12 GB（十进制）。",
+        "两代 × 两副本，仅原始向量就需要 5.12 × 2 × 2 = 20.48 GB。",
+        "索引图结构、ID 映射、metadata、构建临时空间与查询工作区还没有计入；如果文件与驻内存方式不同，应分别估存储和 RAM。",
+        "语义反例：旧 query=(1,0)，相关 item=(1,0)；若新 query 空间旋转为 (0,1)，对旧相关 item 点积变为 0，可能误选旧 item=(0,1)。"
+      ],
+      "conclusion": "双代发布既有容量成本也有兼容性约束。相同维度能避免 shape 错误，却无法避免静默相关性错误；20.48 GB 仅是给定副本策略下的原始向量基线。"
+    },
+    "followups": [
+      {
+        "question": "索引太大，无法同时保留两代全量，如何上线？",
+        "answer": "可以分区域或分片逐步建 v2，按请求所属分片路由到完整的对应版本，并为过渡时期保留明确兼容矩阵。若一次查询跨分片且分片使用不同 embedding 空间，不能直接比较未校准分数；更简单的方案是先让一整类流量切到完整 v2，或临时增加发布资源。节省双代容量的代价是回滚范围和发布复杂度，不能通过混用向量版本来隐藏成本。",
+        "signal": "能面对资源约束，明确降低什么能力而非破坏契约。"
+      },
+      {
+        "question": "切换后回滚成功了，为什么结果仍然差？",
+        "answer": "检查路由是否真的把查询编码器和索引一起回退，以及缓存是否携带新代向量或候选；只回滚模型二进制可能仍命中新缓存。再核对旧索引是否继续消费增量，是否漏掉新商家与删除。通过日志中的 release ID、encoder ID、index generation 和缓存版本重放请求，判断是模型问题、数据陈旧还是混合版本，而不是仅看发布平台显示“回滚成功”。",
+        "signal": "理解模型发布是跨模型、数据与缓存的整体版本问题。"
+      },
+      {
+        "question": "为什么索引构建完成还要等待增量追平？",
+        "answer": "构建从快照开始，耗时期间仍会发生商家创建、修改和删除。如果直接切换，系统会暂时丢新对象或重新展示已删除对象。记录快照水位，并按对象版本应用之后的变更，切换前检验 lag 和删除覆盖；不能只比较对象数量，因为少一条新商家、多一条已删除商家总数仍一样。业务若允许分钟级陈旧可设明确阈值，但硬删除需求需要独立即时过滤。",
+        "signal": "将流处理快照、watermark 与幂等更新迁移到索引发布。"
+      },
+      {
+        "question": "压成 float16 就能把所有索引内存减半吗？",
+        "answer": "只有原始向量部分在真正以 float16 存储时近似减半，图边、对象 ID、metadata 和运行时结构不一定变化。有些引擎会在计算时转换精度，或另存量化结构，因此要测实际常驻内存与性能。精度改变也可能影响近邻排序，需同时比较 ANN recall、业务相关性和尾延迟。不能把原始向量的算术节省直接等同于总 RAM 节省。",
+        "signal": "能区分数学表示大小与真实检索引擎成本。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“维度一样，v1 和 v2 就兼容。”",
+        "fix": "绑定成对编码器、归一化、度量与索引代次，验证语义空间。"
+      },
+      {
+        "mistake": "“建完新索引就删旧索引，节约钱。”",
+        "fix": "先保留回滚窗口和旧代增量更新，待质量与新鲜度证据充分后再回收。"
+      },
+      {
+        "mistake": "“缓存按用户 ID 就够了。”",
+        "fix": "至少加入决定向量含义的模型/预处理版本；候选缓存还需考虑索引与有效性上下文。"
+      }
+    ],
+    "bridge": "你熟悉的 Kafka 重放、Flink 事件版本、缓存命名空间和滚动发布都能复用。这里新的约束是 embedding 的数值语义也属于协议：shape 相同不代表兼容，索引本身是必须版本化发布的数据产物。",
+    "english": "I would deploy the encoders and the index as a versioned bundle. A request must use one compatible release manifest throughout the retrieval path, even while traffic is gradually shifting. I would build from a snapshot, catch up incremental updates, and keep the old generation current during the rollback window. Matching dimensions are necessary, but they do not imply matching embedding spaces.",
+    "exercise": {
+      "task": "画一个 v1→v2 发布状态机，列出每个状态允许的流量；用二维旋转反例计算混用版本的相似度，并估双代容量。",
+      "deliverable": "版本清单 JSON 草稿、发布/回滚时序图、容量表。",
+      "checks": [
+        "清单至少绑定两个编码器、度量、generation、数据水位和预处理。",
+        "算出原始向量 5.12 GB、双代双副本 20.48 GB，并明确额外索引开销。",
+        "覆盖构建期间的一次删除事件，证明不会在切换或回滚后复活。"
+      ]
+    },
+    "rubric": [
+      "说明相同维度仍可能语义不兼容。",
+      "快照、增量与删除都有一致性策略。",
+      "请求级版本配对不会随两个下游独立切换而破坏。",
+      "容量包含双代与副本，并注明非向量开销。",
+      "回滚考虑旧数据新鲜度和缓存，而非仅镜像版本。"
+    ]
+  },
+  "dd-index-537": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "设计模型实验平台：怎样让分桶、曝光、结果和回放对得上？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：新模型上线后，业务说转化更好，数据团队却发现两个报表结论相反。你需要设计一个实验平台，让每一次决策属于哪个实验、用户实际看到什么、订单何时归因、指标如何重算都有可靠记录。本练习来自实验分析平台这一题材，没有读取原文正文，不声称它描述了 DoorDash 的具体实现。",
+      "平台本身不必发明统计方法，但必须把统计所需的数据契约实现正确。稳定分桶不等于可靠曝光；“被分配到新模型”不等于“新模型成功返回并展示”。重复事件、丢日志、延迟订单、模型降级和指标定义变化都可能制造虚假的提升。工程师需要让统计层能够看见这些差异，而不是在清洗时把异常安静地丢掉。"
+    ],
+    "prompt": "自编设计题：为数百个模型支持 A/B 实验。实验按用户稳定分桶，推理通过 Go 服务，日志走 Kafka/Flink，订单结果会迟到。要求可回放、可解释模型降级，并防止重复日志让转化率膨胀。设计控制面、数据面和指标计算。规模为练习假设。",
+    "clarify": [
+      "实验随机化单位是用户、商家、城市还是时间段？不同单位决定稳定分桶键、聚合与方差计算方式，不能统一按请求处理。",
+      "主指标是用户转化、每次曝光转化还是订单金额？先定义分母、归因窗口和去重键，避免同一名字在不同报表中代表不同量。",
+      "哪些故障会让处理组落回旧模型，实验之间是否互斥？要记录 assignment 与实际 served version，保留按分配分析的能力并诊断执行偏差。"
+    ],
+    "concepts": [
+      {
+        "term": "Assignment · 实验分配",
+        "explanation": "决定实验单位被分到哪一组，例如 hash(experiment_id, user_id) 落入处理组。相同单位在实验期间应稳定，分配规则有版本。"
+      },
+      {
+        "term": "Exposure · 有效曝光",
+        "explanation": "记录实验策略真正参与了用户可见决策的事件。分配后可能调用失败或被别的规则覆盖，因此需要单独的决策与曝光日志。"
+      },
+      {
+        "term": "Intention-to-treat · 按分配分析",
+        "explanation": "按原随机分组比较结果，即使部分请求降级也保留在原组，避免只筛选处理成功的人造成选择偏差；执行成功率则另外诊断。"
+      },
+      {
+        "term": "Idempotency · 幂等处理",
+        "explanation": "同一个事件因重试被投递多次时，不重复计数。需要稳定业务事件 ID、去重状态和回放规则，Kafka 使用本身不保证端到端只计一次。"
+      }
+    ],
+    "tests": [
+      "能把随机化、曝光与模型服务日志分开，同时用一致 ID 连接。",
+      "知道实验指标需要版本化语义、去重、成熟窗口和可重复计算。",
+      "能够暴露丢失/降级/组间不均衡，而不是用日志清洗掩盖实验执行问题。"
+    ],
+    "shortAnswer": "我会把实验配置、稳定分配和指标定义放在控制面，服务端每次决策记录实验版本、分配组、实际模型版本和降级原因。曝光与订单分别带稳定事件 ID，通过 Kafka 保留可回放原始日志，Flink 做去重和实时健康检查，最终效果用成熟窗口的离线计算确认。主指标先定义随机化单位、分母和归因窗口，按分配组保留分析，不能只保留新模型成功请求。报表展示样本量、日志完整性、分组比例和指标版本；回放使用同一份版本化定义，才能解释不同报表为何不同。",
+    "deepAnswer": [
+      {
+        "title": "控制面把实验语义变成版本化配置",
+        "body": "实验配置包括 ID、版本、随机化单位、分桶盐、互斥域、流量比例、开始结束时间、主指标与护栏。服务读取配置快照，稳定 hash 决定分组；扩量时要约定稳定性，避免用户频繁跨组。配置发布需审计和回退。对于共享市场供需会互相影响的实验，应明确交给适当的地域/时间随机化设计，不能让平台默认用户分桶适用于所有实验。"
+      },
+      {
+        "title": "记录分配、实际执行与用户可见曝光",
+        "body": "decision_id 连接请求、assignment、served_model、策略版本和 fallback reason。曝光在业务定义的真正生效点产生，而不是进入服务就自动算看到结果；客户端可见性若由客户端决定，需要明确其日志与服务决策关系。分配日志用于按分配分析，实际执行日志用于解释故障和 treatment compliance。不要因新模型超时就把该请求从处理组删掉，否则会选择性留下容易成功的请求。"
+      },
+      {
+        "title": "数据管道兼顾实时排错与成熟结论",
+        "body": "原始事件进入可持久化日志与对象存储，事件 schema 和去重 ID 受约束。实时处理监控事件丢失、重复、异常分桶和指标趋势；最终指标对晚到结果使用明确成熟窗口与修正策略。按业务 ID 去重，订单更正用版本或撤销事件处理。回放从不可变原始数据和固定配置版本计算，输出运行 ID，避免同一张报表悄悄改变指标定义。"
+      },
+      {
+        "title": "指标分母和分析单位保持一致",
+        "body": "若指标是七日用户转化，先按随机化用户聚合是否发生合格订单，再做组间比较，不能把每条曝光当成独立样本。显示 eligible、assigned、exposed、served_new、outcome_ready 的漏斗以及组间差异；这帮助发现漏日志或降级偏向某类用户。运行 sample-ratio 检查和数据质量门槛，但异常原因可能包括实现错误或筛选偏差，不应仅靠阈值自动宣布实验无效或获胜。"
+      }
+    ],
+    "architecture": "实验配置/指标注册表 → 稳定分桶 → Go 决策服务\n                                  ↓\n                   assignment / served / exposure\n                                  ↓\n订单结果 → Kafka 原始事件 → 去重/版本校验\n                  ├→ 实时实验健康监控\n                  └→ 成熟窗口指标 → 版本化报告\n不可变原始日志 + 配置快照 → 可重复回放",
+    "calculation": {
+      "problem": "练习假设：A/B 各随机分配 1000 名用户。A 用户共发起 2000 次请求，有 80 名用户在窗口内下单；B 共 1000 次请求，有 100 名用户下单。主指标定义为用户转化。",
+      "steps": [
+        "A 用户转化率 = 80/1000 = 8%；B = 100/1000 = 10%。",
+        "绝对变化 = 2 个百分点；相对变化 = (10%−8%)/8% = 25%。",
+        "如果错把请求数当分母，会得到 4% 和 10%，把绝对变化误写为 6 个百分点，回答了不同问题。",
+        "若订单事件重复投递，必须先按订单/用户窗口的指标语义去重；记录数不是随机化样本数。"
+      ],
+      "conclusion": "分母错误比统计公式错误更早破坏结论。这个算例只演示口径，不证明 2 个百分点有统计显著性，也不能把每次重复请求当成独立用户样本。"
+    },
+    "followups": [
+      {
+        "question": "处理组 5% 请求超时降级，分析时把它们删掉可以吗？",
+        "answer": "通常不能直接删除，因为超时可能与高负载、复杂用户或大候选集相关，删除会破坏随机分组的可比性。首先保留按原分配组的分析，反映实际发布策略的整体效果；同时用 served_model 和 fallback reason 诊断执行比例与差异。若要估计真正接受处理的效果，需要额外因果假设与合适方法，不能把“成功返回新模型”的子集当成随机样本。",
+        "signal": "理解生产降级会改变实验解释与选择偏差。"
+      },
+      {
+        "question": "Flink 开了 exactly-once checkpoint，指标就一定不会重了吗？",
+        "answer": "不一定。checkpoint 对受支持的 source/state/sink 协议提供相应处理保证，但业务端可能先产生两条不同 ID 的同一事件，外部 sink 也可能不参与事务。需要稳定事件 ID、业务幂等和明确更新语义，重放时同样去重。去重状态有 TTL 时还要说明超过窗口的迟到重复如何处理；最终离线重算可以校正，但实时与最终指标差异必须可解释。",
+        "signal": "能区分流引擎保证与业务端到端正确性。"
+      },
+      {
+        "question": "曝光日志丢了，但订单日志完整，能继续下结论吗？",
+        "answer": "先量化丢失是否组间相同、是否与设备、延迟或模型版本相关。如果主分析依赖曝光分母，缺失会影响指标，不能默认“随机丢一点没关系”。可使用可靠 assignment 记录做预先定义的按分配分析，同时把曝光漏斗作为数据质量故障调查；若关键随机化或结果连接失真，应暂停结论并修复。补日志必须标记来源和时间，不能伪造当时真实曝光。",
+        "signal": "把数据完整性当作结论前提，能给出有条件的替代分析。"
+      },
+      {
+        "question": "两个团队的转化率报表冲突，平台如何定位？",
+        "answer": "比较 metric version、归因窗口、时区、实验配置快照、用户排除规则、订单取消处理与数据成熟水位，再固定同一批随机化单位回放。让报表暴露分子、分母及运行 ID，而不是只给一个百分比。把指标定义实现为版本化计算契约，并为代表性样本保留可审计明细，才能区分真实数据修正与口径变化。切忌直接选看起来更合理或提升更大的报表。",
+        "signal": "能够做可复现的数据产品，而非只堆实时 dashboard。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“进入模型服务就算曝光。”",
+        "fix": "根据用户可见决策定义曝光，并单独保存分配与实际执行。"
+      },
+      {
+        "mistake": "“Kafka/Flink 会自动解决重复和归因。”",
+        "fix": "稳定业务 ID、去重窗口、迟到修正与指标语义必须显式设计。"
+      },
+      {
+        "mistake": "“删掉失败请求后比较模型才公平。”",
+        "fix": "保留按原分组的主要分析，执行失败另行诊断，避免处理后筛选偏差。"
+      }
+    ],
+    "bridge": "这是你 Kafka/Flink 和高并发日志经验最能直接发挥的一题：幂等、事件时间、可回放和监控都是熟悉的机制。新要求是服务于随机化和因果比较，不能任意过滤失败请求或更换分母；配置、指标和数据版本必须一起解释实验结论。",
+    "english": "I would separate assignment, actual model execution, and user-visible exposure. The primary metric needs an explicit unit, denominator, attribution window, and maturity policy. Raw events should be replayable, with business-level idempotency rather than an assumed end-to-end exactly-once guarantee. I would preserve intention-to-treat analysis and expose fallbacks as a diagnostic, not silently remove them.",
+    "exercise": {
+      "task": "写一个小 CSV 或 Python 脚本，输入用户分组、重复曝光、重复订单和晚到订单，输出按用户转化率及曝光完整性漏斗。",
+      "deliverable": "原始事件表、去重/归因规则、A/B 指标表与一次可重复回放结果。",
+      "checks": [
+        "正确得出 8% 与 10%，区分 2 个百分点和 25% 相对变化。",
+        "重复同一个订单事件不改变用户转化结果；窗口外订单按约定排除。",
+        "处理组一次模型降级不会让用户从原实验分组消失，并保留失败原因。"
+      ]
+    },
+    "rubric": [
+      "控制面有稳定分组、互斥与配置版本。",
+      "assignment、served version、exposure 有不同定义和连接 ID。",
+      "指标明确随机化单位、分子分母、归因窗口。",
+      "说明迟到、重复、回放和定义升级。",
+      "实验健康与最终效果分别展示，异常可追踪到数据与发布。"
+    ]
+  },
+  "dd-index-557": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "A/B 显示提升 1%：证据够不够，何时能上线？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：实验看板显示新模型转化率更高，你要判断这是否足以支持发布。数字大小、统计不确定性、业务价值和负面护栏是四件不同的事。这里围绕实验统计引擎主题自编问答，没有读取文章正文，也不声称这些是某公司的实际面试问题。",
+      "作为 ML Infra 工程师，你不必现场发明统计检验，但需要给统计模块正确的随机化单位、聚合数据、实验时长和停止规则。对外卖这样的多方市场，一个用户的处理可能影响另一个用户能用到的骑手或商家容量；普通独立用户 A/B 可能不再回答真正关心的问题。你需要能识别这个前提何时失效。"
+    ],
+    "prompt": "自编演练：新模型实验 A/B 各 10,000 名独立随机用户，A 有 1000 名转化，B 有 1100 名转化。PM 想立即全量，因为看板连续两天 p<0.05。你如何解释结果、检查护栏，并为配送调度模型选择实验单位？数字为练习假设。",
+    "clarify": [
+      "“提升 1%”指 1 个百分点还是相对 1%？先统一定义，否则样本量、商业意义和汇报都可能错位。",
+      "实验是否预先确定观察周期、主指标和停止规则，是否每天反复查看并挑最好一天？固定终点检验不能直接当成任意时刻可停的检验。",
+      "处理是否会改变共享供需或让同一用户跨组？如果存在市场干扰，需与实验设计专家讨论地域集群或带洗脱期的 switchback，而不是默认独立用户样本。"
+    ],
+    "concepts": [
+      {
+        "term": "Absolute vs relative lift · 绝对与相对提升",
+        "explanation": "10% 到 11% 是增加 1 个百分点，相对提升 10%。这不是同一个“1%”，应同时报告原始率和单位。"
+      },
+      {
+        "term": "Confidence interval · 置信区间",
+        "explanation": "在给定模型与重复采样程序下，区间构造方法具有相应覆盖率。它表达估计不确定性，不代表有 95% 概率真实效果落在当前这个固定区间内，也不自动证明无害。"
+      },
+      {
+        "term": "Sequential testing · 序贯检验",
+        "explanation": "允许随时间监控并在满足特定规则时作决策的方法，需要预先采用相应误差控制。反复做普通固定样本检验并看到显著就停，会增加误报。"
+      },
+      {
+        "term": "Interference / switchback · 干扰与交替实验",
+        "explanation": "一个单位的处理影响其他单位结果时独立性受损。switchback 在同一区域按时间块交替策略，但要考虑时间趋势、残留影响、洗脱期和块级相关性。"
+      }
+    ],
+    "tests": [
+      "能正确解释率、百分点、相对提升与不确定性，不把统计显著等同业务成功。",
+      "能识别频繁查看、多指标挑选、样本比例异常和单位不一致等常见失效条件。",
+      "能把共享供需的干扰传递到实验随机化、日志、聚合与停止规则设计。"
+    ],
+    "shortAnswer": "这里 A 是 10%，B 是 11%，差 1 个百分点，相对提升 10%。我会先确认随机化、日志完整性、成熟窗口和预定分析方案，再看效应区间与取消、配送时长和服务可靠性护栏。连续两天普通检验显著不等于可以随时停止；如果没有有效序贯方案，就按预先确定的周期分析。对调度模型，共享骑手和商家容量可能让两组互相影响，我会评估地域集群或时间块 switchback，并考虑洗脱和相关性。统计结论必须连同设计假设与业务阈值汇报。",
+    "deepAnswer": [
+      {
+        "title": "先验证实验执行，再解释统计量",
+        "body": "检查随机化单位、分桶比例、跨组污染、实际执行率和数据成熟窗口。用户随机化时，重复请求不能当独立样本；先按用户聚合。还要明确主指标是预先选定还是从几十个指标中挑出来的，探索性发现需要单独标识。样本比例异常提示数据或分桶可能有问题，应诊断原因，不是删掉几行数据让比例看起来正确。"
+      },
+      {
+        "title": "报告效果大小及其不确定性",
+        "body": "给出两组原始率、绝对差、相对差和适合实验设计的区间，说明估计对应哪个总体和时间窗口。区间不跨 0 只回答特定统计假设下的数据证据，不能证明收益值得部署成本，更不能证明所有切片没有伤害。护栏最好有事先定义的不可接受恶化阈值与分析方法；“护栏没有显著下降”不等于已经证明安全。"
+      },
+      {
+        "title": "停止规则与多重比较必须匹配",
+        "body": "在启动前约定主指标、最小有意义效应、样本量/时长和停止规则。若业务需要持续观察收益，用支持序贯推断的方案并遵守边界；传统固定终点检验就按固定终点解读。严重服务故障可以按运营护栏立即止损，这与宣布收益显著是不同决策。多个主指标、多切片或多版本择优要考虑错误发现和验证，不能只展示最漂亮的 p 值。"
+      },
+      {
+        "title": "市场干扰改变分析单位",
+        "body": "调度策略可能消耗共享骑手容量，让控制组也受影响。可按足够隔离的地域集群随机化，或在地域内按随机化时间块切换策略；选择取决于干扰范围与持续时间。switchback 需要覆盖可比时段、考虑天气与需求趋势，并设置足以减少前一策略残留的洗脱期。有效样本由集群/时间块相关结构决定，不能把几十万订单直接当独立实验样本。"
+      }
+    ],
+    "architecture": "实验问题/干扰范围 → 随机化单位与主指标\n                   ↓\n样本量/时长/停止规则 → 配置与日志\n                   ↓\n执行健康检查 → 按单位聚合 → 估计与区间\n                   ↓\n业务阈值 + 护栏证据 → 扩量 / 延长 / 回退\n严重运行事故 → 立即止损，不等显著性",
+    "calculation": {
+      "problem": "练习假设：固定终点、用户独立随机且无干扰；A/B 各 10,000 用户，转化率分别 0.10、0.11。用大样本独立二项比例差的近似计算，暂不处理序贯和多重比较。",
+      "steps": [
+        "比例差 = 0.11 − 0.10 = 0.01，即 1 个百分点；相对提升 = 0.01/0.10 = 10%。",
+        "标准误 SE ≈ sqrt(0.10×0.90/10000 + 0.11×0.89/10000) ≈ 0.00433474336，即 0.433474 个百分点。",
+        "使用未提前舍入的 SE，近似 95% 区间 = 0.01 ± 1.96×SE ≈ [0.0015039, 0.0184961]，约为 [0.15, 1.85] 个百分点。",
+        "如果数据来自反复偷看后的择时停止，或随机化单位其实是城市/时间块，上面的覆盖解释就不能直接照搬。"
+      ],
+      "conclusion": "在所列假设下有正向差异证据，但区间宽度仍影响商业决策。它没有覆盖护栏、长期效果、市场干扰或多重比较，不能仅凭此算例宣布全面安全。"
+    },
+    "followups": [
+      {
+        "question": "主指标显著提升，取消率没有显著恶化，为什么还不一定安全？",
+        "answer": "未发现显著恶化可能只是护栏样本量不足或估计噪声大。应检查取消率差异区间是否排除了预先定义的不可接受恶化，而不是只看 p>0.05。如果区间仍允许明显业务损失，证据不足；可以延长实验、增加样本或采用更保守的扩量策略。同时检查不同用户、地区和成熟时间窗口，避免总体收益掩盖重要群体退化，但切片探索也需防止选择性汇报。",
+        "signal": "区分没有证据表明有害与有证据排除不可接受伤害。"
+      },
+      {
+        "question": "每小时看一次指标，怎么既保护系统又不乱停实验？",
+        "answer": "把运行安全监控与收益推断分开。错误率、严重延迟、异常预测可按预定义运营阈值即时停止，目的在于止损；收益判断则使用预先确定的固定时长，或正式序贯检验/置信序列及对应决策规则。不要每小时运行普通检验并在第一次显著时宣布胜利。记录每次暂停与原因，因为故障导致的选择性观察期也会影响解释。",
+        "signal": "能兼顾生产安全和统计误差控制。"
+      },
+      {
+        "question": "什么情况下用地域 A/B，什么情况下用 switchback？",
+        "answer": "若干扰主要限制在相对隔离的地域，而且地域数量与相似度允许，可以按地域集群随机化，但有效样本量取决于集群而非订单数。若独立地域太少、策略可以随时间切换，可考虑地域内随机时间块 switchback，并在分析中处理时段趋势、块内相关与前一策略残留。洗脱期取决于订单、骑手等状态持续多久，不是随便设 5 分钟；存在长期学习或不可逆行为时 switchback 也未必合适。",
+        "signal": "能把干扰机制映射到可实施的实验设计及其局限。"
+      },
+      {
+        "question": "样本很大，0.02 个百分点的提升也显著，应该发布吗？",
+        "answer": "统计显著只说明估计相对噪声足够大，不说明净收益值得成本。需要把效果区间与最小有意义收益、推理资源成本、增加的延迟、维护负担和护栏风险一起评估。如果收益低于产品门槛或依赖昂贵模型，可以优先简化模型或只在收益明显的预定义场景使用。选择性切片后再次宣称显著需额外验证，不能用事后挑人群来包装微小总体收益。",
+        "signal": "能够区分统计决策和工程/商业决策。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“p<0.05，说明有 95% 概率新模型更好。”",
+        "fix": "p 值是在指定零假设等条件下衡量数据极端性的量，不是该假设为真的后验概率；同时报告效应与区间。"
+      },
+      {
+        "mistake": "“每天看，显著就停止，结果仍是普通 95% 置信。”",
+        "fix": "预设观察终点或采用有效序贯方法，不能忽略择时停止。"
+      },
+      {
+        "mistake": "“订单很多，所以集群实验样本量很大。”",
+        "fix": "随机化与依赖结构决定有效信息量，按集群/时间块处理相关性。"
+      }
+    ],
+    "bridge": "你可以把实验平台看作有严格语义的数据处理系统：随机化单位像分区键，配置版本像协议版本，成熟窗口像事件时间契约。要额外掌握的是相关样本、停止规则和干扰会改变结论的有效性，不能用吞吐量大或日志条数多代替统计信息量。",
+    "english": "The observed change is one percentage point, or ten percent relative to the control rate. I would report an interval and check whether the design and stopping rule justify it. A non-significant guardrail result does not prove the absence of meaningful harm. For marketplace interventions, I would explicitly evaluate interference and choose the randomization and analysis units accordingly.",
+    "exercise": {
+      "task": "用 Python 标准库 math 重算比例差与区间，再写三个结论：可确定的、依赖假设的、当前不能确定的；最后画一个带洗脱时间的 switchback 时间线。",
+      "deliverable": "计算脚本/表格、三类结论各两条、时间块与洗脱说明。",
+      "checks": [
+        "得到 1 个百分点、相对 10%、近似区间 [0.15,1.85] 个百分点。",
+        "明确说明该区间不适用于未经调整的任意时刻停止或把相关订单视为独立的设计。",
+        "时间线展示旧策略影响持续时间，并解释为何洗脱长度要由业务状态决定。"
+      ]
+    },
+    "rubric": [
+      "正确区分百分点、相对比例、效应与显著性。",
+      "区间解释没有写成固定真值的概率。",
+      "主指标、护栏和停止规则预先约定。",
+      "能够说明市场干扰及 switchback 的残留风险。",
+      "给出业务收益、服务成本和统计证据联合决策。"
+    ]
+  },
+  "dd-index-596": {
+    "title": "多个模型组成 DAG，如何控制关键路径、版本和故障传播？",
+    "minutes": 50,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "目前只核验到这篇工程文章的标题与链接，下面不是文章内容转述。按“模型计算图”这一主题，你需要理解：一次预测可能先做预处理，再并行跑几个模型，最后把它们的结果交给融合模型。节点之间有数据依赖，所以这既是分布式调用图，也是带 schema、设备与模型版本约束的数据流。",
+      "自编演练把问题变成你熟悉的 DAG 执行：哪些节点能并行，哪个分支决定完成时间，失败时能否跳过，以及如何发布一组兼容节点。新增的 ML 难点是中间 tensor 的形状与语义，以及某条模型输出缺失后融合模型是否仍然有效。不能默认少算一个模型就能安全返回。"
+    ],
+    "prompt": "练习假设：预处理 A 之后并行执行模型 B、C，融合模型 D 必须读取 B/C 输出；另有可选解释节点 E。总 deadline 为 120ms，C 偶尔变慢且最近升级了输出维度。设计调度、兼容校验、降级与整图回滚。",
+    "clarify": [
+      "D 是强依赖 B 和 C，还是训练时就支持某条输入缺失？这决定 C 超时时能否用 B 单独返回，而不是工程上随意跳过。",
+      "B/C 的输入能共享吗、是否运行在同一设备？共享 tensor 可减少复制，但设备隔离与部署边界可能增加传输。",
+      "版本升级是 C 单节点改变，还是 C 与 D 必须原子组合？输出维度兼容不等于输出语义兼容。"
+    ],
+    "concepts": [
+      {
+        "term": "DAG / critical path · 有向无环图与关键路径",
+        "explanation": "DAG 描述前置依赖；一次请求的关键路径是决定完成时间的最长依赖链。并行 B/C 的阶段时间通常取二者较大值，还要加调度和传输。"
+      },
+      {
+        "term": "Intermediate tensor contract · 中间张量合约",
+        "explanation": "节点之间不仅约定字节格式，还约定名称、dtype、shape 与含义，例如 C 的第三维是概率还是 logit。维度相同也可能语义不兼容。"
+      },
+      {
+        "term": "Graph manifest · 整图版本清单",
+        "explanation": "把节点版本、依赖边、输入输出 schema、特征与调度配置绑定为一个可验证组合，路由按该组合执行并支持回滚。"
+      }
+    ],
+    "tests": [
+      "能根据数据依赖安排并行与预算，而不是把所有模型同时启动或给每跳完整 timeout。",
+      "能识别部分结果的业务语义，解释哪些节点可以降级、哪些缺失必须失败。",
+      "能把模型版本、tensor 合约、容量隔离与图级观测组合成可运行平台。"
+    ],
+    "shortAnswer": "我先把图画出来，标明强依赖与可选节点。A 完成后并行 B/C，D 等需要的结果，E 只有在剩余预算允许时运行。120ms 是整条请求 deadline，每个节点只获得剩余预算的一部分，并在入队前检查是否值得执行。节点版本与输入输出合约写进 graph manifest，先做边级 schema 和 golden graph 测试，再灰度整图。C 超时只有在训练与业务验证允许时才能用替代路径；否则快速结束并走已验证 fallback。回滚切换兼容图版本，同时保留其温热容量。",
+    "deepAnswer": [
+      {
+        "title": "先把逻辑图和资源图分开",
+        "body": "逻辑图说明谁依赖谁，资源图说明每个节点在哪个 CPU/GPU 池执行、是否共享设备与是否需要拷贝。A 后的 B/C 可以并行，但若二者争同一 GPU，物理上未必得到完全并行收益。融合 D 的输入是数据依赖；可选 E 不应阻塞主结果，除非产品明确需要同步解释。用这两张图避免把画出来的并行直接当作实际吞吐。"
+      },
+      {
+        "title": "沿关键路径传递 deadline",
+        "body": "入口记录总 deadline，A 结束后计算剩余时间，再分配 B/C 和 D 的执行机会，预留返回与序列化时间。所有分支均受同一总预算约束；不让每个节点重新获得完整 120ms。已不可能在期限内完成的节点不再入队，取消不再需要的分支。对不可立即中断的 GPU 工作，避免继续启动其下游，而不是承诺瞬间释放已执行资源。"
+      },
+      {
+        "title": "用合约与 golden graph 阻断静默错误",
+        "body": "每条边校验名称、dtype、shape，图装载时检测环与缺失依赖，运行时检查请求级异常。还要用固定输入验证整图输出与容差，因为 C 输出从概率变成 logit 可能不改变 shape，却让 D 失效。manifest 绑定节点 artifact 摘要和特征版本，防止同一请求前半程用旧节点、后半程撞上新节点。"
+      },
+      {
+        "title": "按语义设计 fallback",
+        "body": "为可选节点规定跳过条件与质量影响；对于关键节点，只允许切换到已训练并评估的替代图、旧模型或业务规则。不能给 D 随手补一个零向量，除非它的训练与验证就包含这种缺失语义。失败与 fallback 单独记录，确保看似成功的接口没有长期只返回低质量路径。"
+      },
+      {
+        "title": "防止图级放大拖垮共享池",
+        "body": "一个外部请求触发多个内部节点，因此 admission 应考虑图的资源成本、fan-out 和租户预算，不只按入口 QPS。节点池有有界队列与配额，避免慢 C 堆积后耗尽所有内存与线程。trace 记录图版本、节点版本、等待、执行与关键路径；发布按整图 canary，检查各节点容量与峰值 tensor 内存。"
+      }
+    ],
+    "architecture": "请求 → A：预处理\n          ├→ B：模型一 ─┐\n          └→ C：模型二 ─┤\n                       ↓\n                    D：融合 → 结果\n                       └→ E：可选解释\n每个节点：剩余 deadline / 版本 / schema / trace",
+    "calculation": {
+      "problem": "练习假设：一次具体请求 A=10ms、B=25ms、C=45ms、D=8ms，跨节点传输与调度总计 12ms，B/C 可真实并行。",
+      "steps": [
+        "依赖路径耗时 = 10 + max(25,45) + 8 + 12 = 75ms。",
+        "若 C 对这次请求变成 100ms，总耗时变为 130ms，超过 120ms deadline。",
+        "若剩余预算已不足以运行 C 与 D，就应在入队前拒绝或走已验证替代图，而不是继续无效计算。"
+      ],
+      "conclusion": "这是一次请求的确定性时间线，不是把各阶段 p99 相加；真实总体 p99 需从整图请求分布测量。"
+    },
+    "followups": [
+      {
+        "question": "给所有节点各 120ms timeout，不是更简单吗？",
+        "answer": "这样会让后启动节点在业务已经过期后继续工作。假设 A 已用 60ms，C 再获得 120ms，就可能在整体 180ms 才返回，更晚还要执行 D。应传递同一总 deadline 的剩余时间，并给必须的下游和返回留余量。节点可以有更短本地上限，但不能超出剩余全局预算；取消也要传下去，避免只终止上游等待。",
+        "signal": "跨服务 deadline 与资源浪费控制。"
+      },
+      {
+        "question": "C 只是一个评分特征，超时补零可以吗？",
+        "answer": "是否能补零取决于零在该特征中的含义，以及 D 训练时是否见过这种缺失模式。零可能代表“极低风险”而不是“未知”，会让模型做出稳定但错误的决策。应使用已验证的缺失标记、支持缺失的融合模型或替代图，并测其质量与分群影响。若没有这些证据，快速失败或业务明确接受的规则降级比静默伪造输入更可控。",
+        "signal": "ML 输入缺失语义与安全降级。"
+      },
+      {
+        "question": "每个节点单独发布更灵活，为什么还要 graph manifest？",
+        "answer": "独立发布可以保留，但运行时必须选择一组已验证兼容的版本。否则 C 输出 schema 或含义改变时，D 仍按旧语义消费，可能不报错却产生质量回归。manifest 记录兼容组合，使一次请求固定使用该组合；节点更新先生成新 manifest 并验证整图，再灰度路由。这样既能复用节点，也能准确回滚和重现某次预测。",
+        "signal": "独立迭代与端到端一致性。"
+      },
+      {
+        "question": "把整个 DAG 都放进一个进程就能解决尾延迟吗？",
+        "answer": "同进程可以减少 RPC、序列化与 tensor 复制，但不消除设备争用、慢节点和排队，还可能让一个模型 OOM 拖垮整图。拆分部署便于独立扩容和隔离，代价是网络、路由与版本管理。选择取决于模型大小、共享设备、变化频率和故障域；先量化复制与网络成本，再决定边界，不应把单进程或微服务当作固定答案。",
+        "signal": "部署边界与性能/隔离取舍。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“并行节点的时延全部相加。”",
+        "fix": "对同一请求按依赖取关键路径；同时计入传输、调度与实际设备争用。"
+      },
+      {
+        "mistake": "“模型输入 shape 一样，版本就兼容。”",
+        "fix": "还需验证 dtype、特征顺序、单位与输出语义，使用整图 golden case。"
+      },
+      {
+        "mistake": "“慢分支删掉就能安全降级。”",
+        "fix": "必须有业务与训练证据支持替代路径，不能任意给融合模型补默认值。"
+      }
+    ],
+    "bridge": "可把你的分布式调用图、Flink DAG、fan-out 与超时经验直接用于调度解释。新增的 ML 约束是中间 tensor 语义、融合模型对缺失输入的行为、版本组合重现性，以及 GPU 共享导致的“逻辑并行但物理争用”。",
+    "english": "I would separate the logical dependency graph from the physical resource placement. Every branch would share the original request deadline, with budget reserved for mandatory downstream work. A graph manifest would pin compatible model and feature versions, and golden tests would validate semantics beyond tensor shapes. Partial failure would use a validated alternative graph rather than arbitrary default inputs.",
+    "exercise": {
+      "task": "用 30 分钟画出 A→B/C→D 的图，为 C 超时与输出维度变化各写一条处理流程。",
+      "deliverable": "逻辑 DAG、版本 manifest 草稿、两种故障的 trace 时间线与降级决定。",
+      "checks": [
+        "正常具体请求算得 75ms，C=100ms 时算得 130ms。",
+        "manifest 同时记录 B/C/D 版本和边的 schema。",
+        "明确指出没有训练验证时不能向 D 任意补零。"
+      ]
+    },
+    "rubric": [
+      "正确识别关键路径与物理设备争用。",
+      "所有节点使用剩余全局 deadline。",
+      "版本校验覆盖 shape 与语义。",
+      "fallback 有明确定义和质量验证依据。",
+      "容量估计考虑内部 fan-out 而不只入口 QPS。"
+    ]
+  },
+  "dd-index-630": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "接口全绿但预测变差：设计可诊断、能行动的模型监控",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：模型服务每秒返回大量合法预测，CPU、错误率和请求延迟看起来都正常，但用户体验正在下降。你要设计一套监控，既能发现输入损坏、特征变旧和预测异常，也能在真实结果到达后判断质量是否下降，并指导具体修复。这里是对模型监控题材的独立教学展开，并非未读文章的摘要。",
+      "普通服务指标回答“是否及时响应”，模型监控还要回答“输入是否可信、结果是否准确、比较是否公平”。输入分布变化通常只是调查信号，不能自动证明质量变差；输出分布稳定也不能证明质量正常。尤其当慢订单还没送达，已完成订单看起来可能非常准，监控必须跟踪标签成熟和缺失本身。"
+    ],
+    "prompt": "自编设计题：平台有 300 个模型，有的每秒上万请求，有的每天只有几十次。标签延迟从几分钟到数天。设计监控、日志与告警，要求发现特征过期、训练服务偏差和真实效果下降，同时避免低流量模型每天误报。数字为练习假设。",
+    "clarify": [
+      "模型任务和标签来源是什么，多久成熟，是否有无法观察的结果？不同任务需要不同指标与等待时间，不能给 300 个模型统一设一个“准确率”。",
+      "哪些特征可以记录，采样后是否还能重建输入？根据数据敏感性、成本和诊断需要决定记录原值、摘要、引用或脱敏值，同时保留版本和可重放证据。",
+      "每个告警由谁处理、能执行什么动作？schema 破坏可快速回退或阻断，弱 drift 信号可能仅触发调查，避免所有变化都夜间呼叫。"
+    ],
+    "concepts": [
+      {
+        "term": "Feature freshness · 特征新鲜度",
+        "explanation": "不只是 Redis key 刚写入，而是特征所代表的业务事件到当前预测之间相隔多久。重写一份旧值会使写入时间新鲜，业务信息仍然过期。"
+      },
+      {
+        "term": "Prediction/label join · 预测与标签连接",
+        "explanation": "用稳定 prediction_id 或业务实体加预测时间连接真实结果，保存标签到达时间与修订版本；不能把同一订单多次预测随意连接成一个样本。"
+      },
+      {
+        "term": "Cohort analysis · 群组/切片分析",
+        "explanation": "按预测发生时间、地区、模型版本等形成可比样本群组。最近只完成的快速订单与昨天全部订单不是同一观察口径。"
+      },
+      {
+        "term": "Alert actionability · 告警可行动性",
+        "explanation": "告警应指出受影响范围、可能原因、负责人及可执行操作。仅提示某特征分布变了，却不给版本和排查入口，很难形成可靠运维。"
+      }
+    ],
+    "tests": [
+      "能将服务健康、输入质量、预测分布和成熟标签后的效果分层，并说明它们证明什么。",
+      "能使用 prediction_id、版本和时间语义建立诊断链，识别延迟标签的选择偏差。",
+      "能按流量、任务和损失设告警门槛，控制样本不足与告警疲劳。"
+    ],
+    "shortAnswer": "我会分四层监控：服务延迟与错误、特征 schema 和事件新鲜度、预测值分布，以及成熟标签后的任务质量。每条预测带 prediction_id、模型/特征版本与降级路径，标签异步连接并按预测时间分组，避免只统计快速完成的订单。高流量模型用短窗口和切片，低流量模型延长窗口并显示样本量和不确定性；输入 drift 先作为诊断线索。告警按可行动性分级：数据契约破坏可阻断或回退，质量退化需要定位版本、特征和人群后决定修复、降级或再训练。",
+    "deepAnswer": [
+      {
+        "title": "四层信号对应四种不同问题",
+        "body": "服务层看端到端延迟分布、错误率、超预算比例、队列和降级；数据层看 schema、类型、范围、缺失、事件时间新鲜度与版本；预测层看范围、异常值和分布；质量层在标签成熟后计算任务指标与业务护栏。某层变红不自动说明其他层失效。例如节日改变输入分布可以是正常业务，而稳定预测分布也可能来自模型卡在一个默认值。"
+      },
+      {
+        "title": "日志足以串起一次真实决策",
+        "body": "记录 prediction_id、请求时间、模型 artifact、特征定义版本、数据时间、水位、输出和 fallback reason。原始特征是否保存取决于权限与成本，可用受控采样、特征快照引用与聚合摘要；不能为排错无限收集敏感字段。标签单独保存发生、可用和修订时间，异步连接到相应预测。每个监控点可以下钻到版本和少量可重放样本，而不是只有全局曲线。"
+      },
+      {
+        "title": "比较同等成熟度、同类人群",
+        "body": "按预测时间建 cohort，并给标签定义成熟窗口；展示已成熟率、未匹配率和标签到达延迟。不能只过滤“标签已到”后就当作无偏样本，因为困难订单可能完成更慢或直接取消。按地区、商家、设备和模型版本切片，同时防止无界高基数标签把监控系统压垮。对同一请求比较训练与在线特征结果，是诊断 skew 的直接方式，分布相似并不足以证明逐样本一致。"
+      },
+      {
+        "title": "告警门槛要反映风险与证据量",
+        "body": "高流量模型可以用短长双窗口发现突发并确认持续性；低流量模型使用更长窗口、最小样本量和区间，但“样本不足”应明确展示，不能默认为健康。严重契约错误不必等统计显著性。给 drift 和低置信波动较低优先级，把确定的坏值、成规模成熟质量退化以及服务预算快速消耗提升优先级。运行手册分别指向数据修复、版本回退、限域基线和候选再训练。"
+      }
+    ],
+    "architecture": "预测服务 → 服务指标/输入检查/预测摘要\n     ↓ prediction_id + 模型/特征/时间版本\n预测日志 ───────────┐\n真实结果 → 标签成熟/修订 → 连接与 cohort 评估\n                         ↓\n      分层监控 + 版本/切片 → 分级告警/责任人\n                         ↓\n       重放诊断 → 修复 / 降级 / 回退 / 再训练",
+    "calculation": {
+      "problem": "练习假设：同一时间发出的 100 个 ETA 预测中，90 个快速完成订单绝对误差为 2 分钟；另外 10 个慢订单尚未完成，后来误差均为 20 分钟。",
+      "steps": [
+        "只看当前已完成的 90 单，临时 MAE = 90×2/90 = 2 分钟。",
+        "等全部成熟后，MAE = (90×2 + 10×20)/100 = 3.8 分钟。",
+        "若昨天使用全量成熟订单、今天只用已完成订单，今天“更好”可能完全来自观察选择。",
+        "监控应同时显示预测 cohort 的标签完成率 90%、等待窗口和后续修正，而不是把临时 2 分钟当最终结论。"
+      ],
+      "conclusion": "标签缺失不是随机时，直接比较已匹配样本会系统性乐观。等待合理成熟窗口仍要说明取消、永不完成和其他不可观察结果如何处理。"
+    },
+    "followups": [
+      {
+        "question": "特征分布漂移了，但模型质量没下降，要告警吗？",
+        "answer": "可以记录趋势或触发低优先级调查，但要看特征重要性、业务变化和成熟标签证据。漂移可能来自正常季节性，也可能先于质量下降，因此保留数据质量检查与后续观察，不应直接自动再训练并发布。相反，schema 破坏或大量非法值是确定的契约问题，可立即采取行动。监控界面应明确“输入变化”与“已观察质量下降”，避免同一种红色告警混淆两者。",
+        "signal": "知道 drift 是证据链中的信号而非最终结论。"
+      },
+      {
+        "question": "每天只有 20 条预测的模型，怎么判断退化？",
+        "answer": "短窗口比例很不稳定，应延长观测期、报告样本量与不确定性，并按业务风险决定是否需要人工审核或更保守基线。可以使用确定性契约检查和输入/预测范围检查作为早期保护，但不能把这些替代真实质量证据。若跨模型或群组汇总，需要任务和分布具有可比较性；不要为了样本量把完全不同问题混在一起。“暂无法判断”应是合法状态。",
+        "signal": "能处理低样本量而不伪造精确的健康评分。"
+      },
+      {
+        "question": "全局缺失率不变，怎么仍可能有 training-serving skew？",
+        "answer": "全局比例相同可能掩盖不同请求上的错位。例如训练与线上各有 5% 缺失，但缺失的是不同人群；也可能取值分布一样而字段映射颠倒。采样同一 prediction_id 的输入，通过版本一致的离线特征计算重放，逐字段比较值、默认处理和事件可用时间。记录特征定义 hash 与预处理版本，才能找到只影响某发布或切片的偏差。",
+        "signal": "知道分布对齐不等于逐样本语义一致。"
+      },
+      {
+        "question": "监控指出质量差，怎么决定修数据还是再训练？",
+        "answer": "先沿发布与时间线关联：模型版本变了、特征版本变了，还是数据新鲜度/缺失突变？使用重放和受影响切片对照；如果修复输入后旧模型恢复，优先修数据。若输入契约正确，成熟标签显示相似条件下关系持续变化，再考虑候选再训练。若只是流量组成变化，可能需要分群容量或目标调整。每个动作先限域验证，避免把长期数据缺陷训练进模型。",
+        "signal": "能把监控信号转成有因果假设的操作顺序。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“所有模型看同一个 accuracy 阈值。”",
+        "fix": "按任务定义指标、成熟窗口与损失，不同模型不可只比一个通用百分比。"
+      },
+      {
+        "mistake": "“Redis 刚更新，因此特征一定新鲜。”",
+        "fix": "追踪业务事件时间、计算时间与写入时间，识别重新写入的旧数据。"
+      },
+      {
+        "mistake": "“累计耗时除请求数，就是 p99。”",
+        "fix": "该比值是均值；分位延迟需分布/直方图或相应采样，端到端目标单独测量。"
+      }
+    ],
+    "bridge": "Kafka lag、Flink watermark、K8s 指标和分布式 tracing 能直接支撑监控前半段。新增部分是 prediction→label 的异步质量闭环、标签选择偏差，以及输入分布变化不等于模型有效性变化；这些决定监控什么时候可以下结论。",
+    "english": "I would distinguish service health, input integrity, prediction behavior, and quality measured with mature labels. Every decision needs enough version and timing metadata to support a targeted replay. Drift is an investigation signal, not automatic proof that the model is worse. For low-volume models, I would expose uncertainty and insufficient evidence rather than label them healthy by default.",
+    "exercise": {
+      "task": "用 100 条模拟预测和分批到达的标签实现两个报表：只看已完成样本的临时 MAE，以及按预测 cohort 追踪的成熟评估。增加一条特征事件时间过期但写入时间刚更新的记录。",
+      "deliverable": "两张误差/成熟率表、一个 freshness 检查、四层告警清单。",
+      "checks": [
+        "标签未齐时显示 2 分钟和 90% 完成率，齐全后更新为 3.8 分钟。",
+        "过期业务事件即使刚写入 Redis，也被 freshness 检查识别。",
+        "drift 提醒与确定性 schema 错误有不同优先级、负责人和后续动作。"
+      ]
+    },
+    "rubric": [
+      "四层监控的证据边界说清楚。",
+      "预测/标签 ID、版本和三类时间可追踪。",
+      "演示标签延迟如何制造乐观偏差。",
+      "低流量有样本量和不确定性状态。",
+      "至少能将三种故障映射到不同修复动作。"
+    ]
+  },
+  "zh-index-0": {
+    "title": "热门商家特征缓存同时失效，如何避免缓存风暴和错误预测？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "目前只核验到“缓存风暴”文章的索引，以下是围绕该主题编写的 ML infra 演练，不是原文摘要。缓存风暴指大量请求在同一时间发现缓存失效，于是同时访问下游重建同一个值。对普通服务它会放大数据库压力，对预测服务还会引出 freshness 与特征语义问题。",
+      "例如商家静态类别可以容忍较长缓存，最近一分钟订单量则随时间快速变化；把两者都设成一样的 TTL 会混淆性能与正确性。模型升级后，缓存键也可能需要区分模型版本、特征版本与请求上下文。你要回答的是“如何保护下游，同时保证返回值仍适用于本次预测”，而不是仅提高 hit rate。"
+    ],
+    "prompt": "练习假设：一个热门商家特征 key 每秒收到 10000 次读取，TTL 到期后重建需要 40ms，底层特征存储最多承受该热点 200 reads/s。设计防风暴方案，并说明模型升级和过期数据的处理。",
+    "clarify": [
+      "缓存的是原始特征、派生特征还是最终预测？三者对模型/特征/上下文版本的依赖不同，决定 key 的组成。",
+      "每个字段允许多旧？静态商家属性与实时订单计数应有不同 freshness contract，不能统一无限 stale。",
+      "应用有多少实例、热点是否跨区域？单进程 singleflight 只能合并本进程请求，不会自动全局合并。"
+    ],
+    "concepts": [
+      {
+        "term": "Cache stampede · 缓存风暴",
+        "explanation": "同一热点值失效时多个请求重复重建，瞬间把缓存后的系统暴露在放大的流量下。"
+      },
+      {
+        "term": "Singleflight / lease · 请求合并与刷新租约",
+        "explanation": "同一 key 只让一个工作者重建，其他等待或使用可接受旧值；跨实例需要额外协调，且锁/租约本身要处理超时与持有者失效。"
+      },
+      {
+        "term": "Freshness contract · 新鲜度合约",
+        "explanation": "明确某特征值的事件时间/生成时间、允许陈旧多久以及缺失时行为，缓存是否命中不代表值在业务上仍可用。"
+      }
+    ],
+    "tests": [
+      "能计算热点重建放大，解释单实例合并与全局合并的边界。",
+      "能把 TTL、stale 与特征新鲜度连接起来，不为延迟牺牲无界质量。",
+      "能设计版本化缓存键、受限刷新和下游保护，解释失效与锁故障。"
+    ],
+    "shortAnswer": "我会先区分缓存对象和字段新鲜度，再对同一 key 合并刷新，避免每个 miss 都打到下游。单进程 singleflight 不够时，用短租约或集中刷新协调，但不能让所有请求无限等锁。TTL 加抖动减少大量 key 同时过期，热点提前刷新；允许的旧值只在有上限的 stale 窗口内返回，并记录值年龄与降级比例。入口和刷新池都有并发与速率上限，防止下游故障时重试风暴。模型或特征合约变化时按依赖版本构造 key，提前预热新 namespace，避免命中了语义不兼容的旧值。",
+    "deepAnswer": [
+      {
+        "title": "先定义缓存语义再选机制",
+        "body": "原始特征缓存通常绑定 entity、特征定义版本与必要时间语义；预测缓存还可能绑定模型版本、全部有效输入和上下文，否则不同用户或模型可能错误共享结果。显式记录 value_age、source_timestamp 和 schema_version。对于高频变化特征，允许的 stale 窗口可能很短，缓存策略必须从这个合约倒推，不能只从 Redis 内存和 hit rate 出发。"
+      },
+      {
+        "title": "把重建变成有界的单次工作",
+        "body": "每进程用 singleflight 合并相同 key；跨实例热点可用短 lease 让一位刷新者工作，其他请求读合格旧值或有界等待。lease 过期、刷新者崩溃、慢刷新覆盖新值都要考虑，可以用版本比较或 fencing token 拒绝过时写入。锁失败不应默认所有请求都去下游重建，否则协调系统故障反而触发更大风暴。"
+      },
+      {
+        "title": "错开过期与主动预热",
+        "body": "TTL jitter 可分散很多 key 同时到期，但对单个极热 key 到期时的争抢并不充分，还需要请求合并与提前刷新。soft TTL 触发后台更新，hard freshness limit 决定何时旧值必须停止使用。刷新任务使用独立、有界线程池与速率预算，避免后台任务挤掉在线读。预测性预热适合已知热门实体与新版本发布，不能把所有可能 key 全量预热造成更大负载。"
+      },
+      {
+        "title": "下游故障时守住预算与语义",
+        "body": "设置刷新 deadline、最大并发、重试预算和熔断，失败后用可解释的 stale-if-error 或模型默认路径；只有业务明确允许时才使用旧值，超出上限就返回缺失标记或安全降级。负缓存可缓解不存在 key 的穿透，但 TTL 与语义要谨慎，避免刚创建的实体一直不可见。观测命中率之外，还看回源 QPS、刷新合并数、值年龄、超时与质量。"
+      },
+      {
+        "title": "模型发布也是缓存事件",
+        "body": "当输入编码、特征定义或模型版本改变时，只让相关依赖变化的缓存 namespace 失效；不是所有缓存都必须绑定模型版本。新 namespace 逐步预热和灰度，旧 namespace 在回滚窗口内保留。更新 key 编码要稳定且无歧义，避免不同上下文碰撞；若缓存预测结果，必须限制缓存对个性化与时效性的影响。"
+      }
+    ],
+    "architecture": "请求 → 版本化 key → cache\n                    ├ fresh：返回\n                    ├ 可接受 stale：返回并刷新\n                    └ 不可用：有界等待 / fallback\n                         ↓\n          singleflight / 短租约\n                         ↓\n       有界刷新池 → 特征存储 → 条件写回",
+    "calculation": {
+      "problem": "练习假设：同一 key 10000 reads/s，重建耗时 40ms，且这段时间请求近似均匀到达。",
+      "steps": [
+        "无合并时，一个重建窗口内约有 10000 × 0.040 = 400 次读可能发现 miss 并重复回源。",
+        "单进程 singleflight 可把本进程这批重建合为 1 次；若有 20 个独立应用实例，最坏仍可同时出现约 20 个刷新者。",
+        "TTL jitter 能分散不同 key 的到期时间，却不会自动把这个单热点的 400 次请求合为一次。"
+      ],
+      "conclusion": "这是简化到达模型下的放大量级，不是严格并发上界；突发、重试和更慢重建会进一步放大。"
+    },
+    "followups": [
+      {
+        "question": "已经用了分布式锁，为什么下游仍然被打爆？",
+        "answer": "先看锁是否只覆盖一个 key、是否因超时过早释放、是否在拿锁失败后直接回源，以及多个 namespace 是否实际上指向同一底层数据。刷新超过 lease 时长还可能出现多个持有者，需版本条件写回或 fencing 防止旧值覆盖。更重要的是设置下游并发与速率上限，因为锁只合并相同 key，无法限制大量不同 key 同时失效。",
+        "signal": "协调正确性与全局容量保护。"
+      },
+      {
+        "question": "stale-if-error 能不能一直开到下游恢复？",
+        "answer": "不能把持续旧值当成无代价成功。先为字段定义最大年龄与风险：商家类别可能可容忍更久，实时供需和库存可能不能。返回旧值时记录年龄、原因和降级比例，超过 hard limit 改走明确的缺失处理、轻量模型或拒绝路径。若旧值影响不同人群，应看分群质量。下游恢复还要限制集中刷新，避免所有过期值同时回源导致二次故障。",
+        "signal": "新鲜度、质量与故障恢复。"
+      },
+      {
+        "question": "所有缓存 key 都加模型版本最安全吗？",
+        "answer": "不一定，过度绑定会让每次模型发布都清空与模型无关的原始特征缓存，造成不必要的冷启动。key 应绑定实际决定值语义的依赖：原始特征可能只需要实体、特征版本与时间桶；预测结果通常还需要模型版本和有效输入上下文。先列依赖关系，再决定 namespace。所谓安全不只是防旧值，也包括避免升级瞬间把共享存储压垮。",
+        "signal": "依赖建模与失效范围控制。"
+      },
+      {
+        "question": "缓存 hit rate 从 90% 到 99%，为什么模型效果反而差？",
+        "answer": "可能是 TTL 拉长、key 少了上下文，或者模型升级后仍命中旧语义结果。命中率只衡量绕过回源的比例，不判断值是否正确。检查值年龄、schema/model version、关键字段缺失率，以及不同输入是否被错误归并。用固定请求对比不走缓存的路径，再在成熟标签上看质量差异。不能拿更高 hit rate 作为缓存策略成功的唯一证据。",
+        "signal": "性能指标与预测正确性的分离。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“加随机 TTL 就解决单热点风暴。”",
+        "fix": "随机 TTL 主要分散不同 key；单热点还需要刷新合并、限流和可接受旧值策略。"
+      },
+      {
+        "mistake": "“singleflight 保证全系统只有一次回源。”",
+        "fix": "它通常只在一个进程内合并，跨实例需额外协调且仍要有全局限流。"
+      },
+      {
+        "mistake": "“缓存命中就表示特征可用。”",
+        "fix": "还需检查 schema、上下文和 freshness，过旧或不兼容的命中可能比 miss 更危险。"
+      }
+    ],
+    "bridge": "这道题可以从你熟悉的 Redis 热 key、缓存穿透、请求合并和背压展开。要补充 ML 的时间与版本语义：同一个 entity 的值可能在结构上正确但已不适合当前模型，实时特征陈旧会造成质量回归而非明显接口报错。",
+    "english": "I would define the freshness contract before choosing a TTL. Request coalescing and bounded refresh concurrency protect the feature store, while stale values are served only within an explicit age limit. TTL jitter helps with synchronized expiry across keys but does not solve a single hot key by itself. Cache keys should include the dependencies that determine value semantics, and model rollouts should warm compatible namespaces gradually.",
+    "exercise": {
+      "task": "用 25 分钟画出 fresh、soft-expired、hard-expired 三种状态，并写一个热点刷新伪代码流程。",
+      "deliverable": "状态图、key 组成示例、租约失败/刷新失败的行为表。",
+      "checks": [
+        "算出 40ms 窗口约 400 次潜在重复回源。",
+        "说明 20 个实例各自 singleflight 时仍可能有 20 个刷新者。",
+        "写出最大 stale 年龄与超过上限后的明确动作，不能无限返回旧值。"
+      ]
+    },
+    "rubric": [
+      "按实际依赖构造缓存 key。",
+      "区分单进程与跨实例请求合并。",
+      "正确解释 TTL jitter 的边界。",
+      "有界刷新与回源失败不会造成重试风暴。",
+      "用 freshness 和质量补充 hit rate。"
+    ]
+  },
+  "zh-index-2": {
+    "title": "每跳都有 timeout，为什么推理链路仍然雪崩？",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "这里只核验到“强制超时”文章的索引，没有读到原文。以下按该主题设计一个 ML serving 可靠性演练：timeout 是某次操作愿意等待多久，deadline 是整条业务请求最晚何时必须完成。如果每一跳重新开始一个完整 timeout，请求可能在用户早已离开后仍继续占用下游资源。",
+      "对模型推理，取消尤其不是一个简单的布尔开关。还在队列中的请求通常可以移除，正在做 CPU 预处理的任务要协作检查取消，已经提交的 GPU 执行则未必能立刻中断。可靠性设计需要同时管“还该不该接”“还该不该启动”“上游是否还需要结果”，并控制失败后的重试放大。"
+    ],
+    "prompt": "练习假设：业务给预测链路 100ms，总流程为网关→特征 RPC→Triton→后处理。每层都设 100ms timeout，但过载时后端队列越来越长，客户端已返回超时，GPU 仍在计算。设计 deadline、取消、重试与 fallback 策略。",
+    "clarify": [
+      "100ms 从哪个入口计时，返回序列化与网络是否包含在内？若只给模型 RPC 100ms，业务总预算会被遗漏。",
+      "请求是纯预测还是伴随扣费、日志写入或状态更新？重试资格与去重需求依赖操作语义，而不只依赖 HTTP 方法。",
+      "fallback 的质量与耗时上限是什么？如果降级还要访问同一个拥塞依赖，它可能无法真正保护用户。"
+    ],
+    "concepts": [
+      {
+        "term": "Timeout / deadline · 等待时长与截止时间",
+        "explanation": "timeout 是局部最长等待，deadline 是整条请求的截止点。下游等待时间应取本地上限与全局剩余预算中更紧的一个。"
+      },
+      {
+        "term": "Cancellation propagation · 取消传播",
+        "explanation": "上游不再需要结果时，通知下游停止可停止的排队和工作。收到取消信号不代表所有底层计算都已经被抢占。"
+      },
+      {
+        "term": "Retry budget / amplification · 重试预算与放大",
+        "explanation": "一次业务请求可能因多层重试变成多次计算。限制总尝试次数和全局额外流量，防止故障时把负载成倍放大。"
+      }
+    ],
+    "tests": [
+      "能以一条具体时间线解释独立 timeout 为什么超出总预算。",
+      "能区分队列取消与正在执行的 GPU 工作，设计尽早拒绝与有界资源。",
+      "能明确何时重试、由哪层重试、何时 fallback，避免多个层级各自放大流量。"
+    ],
+    "shortAnswer": "我会在业务入口建立总 deadline，沿 gRPC/context 传播剩余预算，每跳本地 timeout 只能更短，不能重新拿完整 100ms。入队前检查剩余时间和队列压力，对明显来不及完成的请求快速拒绝；取消时移除未执行任务，并阻止不再需要的下游工作，但不承诺已提交 GPU kernel 立刻停止。重试集中在一层，只有瞬时、可恢复且有预算的错误才有限重试，过载不盲目重试。fallback 需要独立的短预算、明确质量语义和可观测比例，确保成功响应不是长期掩盖降级。",
+    "deepAnswer": [
+      {
+        "title": "把总预算带到每个边界",
+        "body": "入口创建 100ms 总 deadline，后续使用剩余时间而不是再起一个独立 100ms 计时器。Go 中应把接收的 request context 传给下游调用，并可派生更紧的局部 timeout；不要为了方便换成 context.Background()。RPC 协议传播剩余超时可以避免依赖跨机器绝对时钟完全一致，但应用仍要正确传递上下文。为后处理和返回保留余量，不能把最后一毫秒都分给模型。"
+      },
+      {
+        "title": "把 admission 放在昂贵计算之前",
+        "body": "入口限制 in-flight 与租户配额，模型队列有最大长度与排队期限。根据近期排队年龄、服务时间估计与剩余预算，尽早拒绝明显无法按时完成的请求；估计不可能百分百准确，但比无限排队更可控。过期任务在进入 CPU/GPU 执行前再次检查，防止队列等待后仍启动完整计算。服务端自己的队列超时策略不能被误当成总业务 deadline。"
+      },
+      {
+        "title": "取消要贯穿队列和执行阶段",
+        "body": "等待者取消后减少无用工作：移除可移除的队列项，CPU 阶段在安全检查点响应 context cancellation，不再触发后续特征或模型调用。共享 batch 可能同时包含有效和已取消请求，不能为了其中一个请求取消整批而伤害其他用户；可以丢弃过期结果并避免后续工作。记录 deadline 后仍执行的 wasted work，评估取消机制是否真正减少资源浪费。"
+      },
+      {
+        "title": "让重试成为有限策略而非默认循环",
+        "body": "仅对可恢复错误和有足够剩余预算的幂等操作考虑重试，并使用退避与 jitter、单层重试责任和总尝试预算。过载错误、确定的输入错误、已耗尽 deadline 不应立即再打同一个拥塞池。hedging 复制慢请求也会增加容量需求，只能在有余量、尾延迟收益可验证且重复请求可控时使用，不是免费的 p99 修复。"
+      },
+      {
+        "title": "把 fallback 当作有质量代价的正式路径",
+        "body": "可选降级包括已验证轻量模型、较少候选或有时限的缓存结果，但必须说明输出语义与覆盖限制。为 fallback 预留时间并避免依赖同一故障资源，记录触发原因、版本与比例，质量指标要能分离主路径和降级路径。若没有业务可接受的结果，明确拒绝通常比返回看似正常但无依据的预测更容易检测和恢复。"
+      }
+    ],
+    "architecture": "入口：总 deadline=100ms / admission\n   ↓ 剩余预算\n特征 RPC → 模型有界队列 → 执行 → 后处理\n   ↑          ↑             ↑\n   └──────── 取消传播 ────────┘\n无法按时完成 → 已验证 fallback 或快速拒绝\n重试：一层负责、次数与总时间受限",
+    "calculation": {
+      "problem": "练习假设：总预算 100ms，网关已花 8ms、特征查询花 32ms，后处理与返回预留 10ms。",
+      "steps": [
+        "到达模型时全局剩余时间 = 100−8−32 = 60ms。",
+        "模型可用预算最多 60−10 = 50ms，而不是重新得到 100ms。",
+        "若预计排队 40ms、执行 25ms，65ms 已超过模型预算；继续排队大概率只能产生用户收不到的结果。"
+      ],
+      "conclusion": "这是单次请求的预算与估计，不是严格的调度保证；即使估计通过也要有实际 deadline 和取消，避免预测误差拖出无界等待。"
+    },
+    "followups": [
+      {
+        "question": "客户端超时了，服务端为什么还在算？",
+        "answer": "客户端停止等待不一定自动终止服务端工作：取消可能没有传播、工作已离开请求 context 管理的 goroutine，或者 GPU 执行已经提交而不支持即时中断。先检查取消信号到达了哪一层，再分别处理队列移除、CPU 协作取消和下游不再启动。对共享 batch 保留仍有效的请求，统计过期后的执行成本；不能通过“客户端早一点返回”假装系统资源已被释放。",
+        "signal": "取消语义与工作生命周期。"
+      },
+      {
+        "question": "每层都重试三次，最坏会发生什么？",
+        "answer": "如果三个嵌套层每层最多尝试三次，最深层可能收到 3×3×3=27 次调用；具体上界取决于错误和调用结构。过载时这会把原始问题放大。应明确由哪一层负责重试，并限制整个业务请求的尝试数与时间，其他层返回可区分的错误。短暂网络错误可以在剩余预算内重试，但已经排队超时或收到容量拒绝时不能不加判断地继续制造工作。",
+        "signal": "重试放大与分层责任。"
+      },
+      {
+        "question": "hedged request 能把慢请求复制到另一台，为什么不默认开？",
+        "answer": "复制会增加真实计算量，尤其模型推理昂贵，可能把接近饱和的池子推入过载，使所有请求更慢。只有独立副本存在余量、操作幂等、尾部收益明显时才适合有限 hedging，且延后启动、限制比例并取消不再需要的副本。即便取消发送成功，也要评估 GPU 工作是否仍在执行。验收应看整体容量、成本和 p99，而不只看被复制的那几个请求。",
+        "signal": "尾延迟优化的全局资源代价。"
+      },
+      {
+        "question": "怎么证明 timeout 改造有效，而不是只让错误更快返回？",
+        "answer": "同时看按时成功率、拒绝/超时/fallback 分布、队列年龄、deadline 后 wasted work 与下游负载。如果只是提前报错而有效吞吐没改善，说明策略可能只是把等待变成失败。通过突发和依赖变慢的故障注入比较同等负载下有多少请求获得合格结果，以及系统多久恢复；适当快速拒绝应保护可完成请求，而不是掩盖整体质量或可用性下降。",
+        "signal": "从局部耗时到有效服务结果的验收。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“每一跳都设置 100ms，就满足总 100ms。”",
+        "fix": "传播总 deadline 的剩余时间，并为必要下游与返回保留预算。"
+      },
+      {
+        "mistake": "“context cancel 会立即停止已经跑的 GPU kernel。”",
+        "fix": "它是取消信号，执行能否停止取决于后端；优先避免排队过期后继续启动。"
+      },
+      {
+        "mistake": "“503、超时都立即重试三次。”",
+        "fix": "区分过载、输入错误与瞬时故障，在单层、总预算内有限重试，避免放大。"
+      }
+    ],
+    "bridge": "你可以用 Go context、RPC 链路与高并发背压直接解释主干。ML 新增的是昂贵且未必可抢占的设备执行、一个 batch 多个用户的取消语义，以及 fallback 可能返回成功却降低预测质量，必须单独观测。",
+    "english": "I would establish one end-to-end deadline and propagate the remaining budget through every RPC. Before queueing expensive inference work, the service should check admission limits and whether enough time remains. Cancellation should remove pending work and prevent downstream calls, but it may not immediately interrupt an already submitted GPU kernel. Retries would be bounded and owned by one layer, with fallback tracked as a distinct quality-affecting path.",
+    "exercise": {
+      "task": "用 25 分钟画一条带时间点的 gRPC 链路，写出各阶段可用预算，并列出排队中、CPU 中、GPU 中三种取消动作。",
+      "deliverable": "100ms 时间线、一段 context 传递伪代码、错误类型与重试策略表。",
+      "checks": [
+        "模型预算算出 50ms，排队40ms加执行25ms被判为不适合继续。",
+        "解释三个层级各最多尝试三次时可能放大到27次。",
+        "取消表没有承诺 GPU kernel 必然立即停止，且共享 batch 不会误伤有效请求。"
+      ]
+    },
+    "rubric": [
+      "正确计算并传播剩余 deadline。",
+      "入口、队列、执行前均有合适的边界。",
+      "明确取消能做什么和做不到什么。",
+      "重试只由一层负责且有总预算。",
+      "验收包含有效成功吞吐、质量和 wasted work。"
+    ]
+  },
+  "zh-index-3": {
+    "title": "设计一个实时 ML Serving 平台：从请求到可靠预测的完整答案",
+    "minutes": 45,
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "paraphrase": [
+      "目前只核验到“实时预测在 DoorDash”演讲的索引，没有读取演讲正文。以下是基于实时预测这一主题编写的系统设计参考，不声称是其原架构。这里的“实时”需要拆成两件事：在线请求多久得到预测，以及预测使用的特征多久更新；推理响应 50ms 不代表特征就是最近 50ms 的。",
+      "一个 serving 平台要把特征读取、模型版本路由、CPU/GPU 执行、部署与观测连起来。控制面决定哪个版本可发布、路由多少流量和资源配额；数据面处理每次低延迟预测。对你而言，网关、分片、限流和 K8s 很熟悉，重点是把模型合约、特征 freshness、warm-up、预测质量与资源成本加入这些后端设计。"
+    ],
+    "prompt": "练习假设：外卖推荐场景峰值 2400 requests/s，每请求对 50 个候选商家评分，端到端 p99 目标 100ms；多个团队发布不同大小的模型，特征可能缺失，模型启动需 90 秒。设计可灰度、可回滚、多租户隔离的实时 serving 平台。",
+    "clarify": [
+      "100ms 包含候选召回还是只包含排序评分？每请求候选数量和模型输入 shape 分布影响工作量，不能只按 QPS 估算。",
+      "模型是树模型、小型神经网络还是大模型，CPU/GPU 各自实测性能如何？设备选择由成本和 SLO 决定，而不是 ML 必须上 GPU。",
+      "特征 freshness、缺失时行为、租户优先级与质量目标是什么？这些决定读取策略、隔离和降级能做到哪一步。"
+    ],
+    "concepts": [
+      {
+        "term": "Control plane / data plane · 控制面与数据面",
+        "explanation": "控制面管理版本、配置、配额和发布；数据面按已验证配置处理请求。registry 临时不可用不应让每次预测都无法查询版本。"
+      },
+      {
+        "term": "Online features / serving contract · 在线特征与推理合约",
+        "explanation": "请求上下文和共享特征按模型需要的 schema 组装，包含 freshness、默认值和版本约束；拿到一个 key 的值还不等于可直接喂给模型。"
+      },
+      {
+        "term": "Effective capacity · 有效容量",
+        "explanation": "满足错误率、尾延迟和请求分布条件下，已预热实例真正能完成的吞吐。启动中的 Pod 数或 GPU 理论峰值都不是有效容量。"
+      }
+    ],
+    "tests": [
+      "能在给定用户场景下澄清目标、估算 request→item 工作量并画出数据流。",
+      "能覆盖 feature/training/serving 合约、部署版本、过载与质量观测，而不堆组件名。",
+      "能在延迟、隔离、利用率、发布速度和成本之间给出有条件的选择。"
+    ],
+    "shortAnswer": "我先把 2400 次请求乘以每次 50 个候选，得到 12 万次样本评分每秒，再按模型和 shape 的实测容量规划设备。数据面是网关准入、版本路由、批量特征读取、合约检查、模型队列与 CPU/GPU 池、后处理；整个链路共享 deadline。控制面用 registry 和发布 manifest 绑定模型、特征及 runtime，预热后再灰度，保留旧版本回滚容量。高峰靠预热与提前扩容，过载靠有界队列、租户配额和已验证降级。观测同时覆盖端到端 p99、fallback、特征年龄、版本和成熟标签质量。",
+    "deepAnswer": [
+      {
+        "title": "先定义工作负载与成功标准",
+        "body": "分别确认 requests/s、每请求候选数、samples/s、输入 shape、输出大小和峰值持续时间。练习中 2400×50=120000 samples/s；如果用户公共特征每请求读一次，而商家特征每候选读一次，逻辑读取量与物理 RPC 数不同，可用批量读取降低 RPC 开销。p99 100ms 是设计目标，需同时给出错误率、可接受 fallback 与质量指标，否则仅减少候选就可能看似成功。"
+      },
+      {
+        "title": "把在线路径保持短且可追踪",
+        "body": "网关做认证、租户配额和 deadline，路由选择已加载的兼容模型版本；特征层批量读取共享和候选特征，检查 schema、缺失与 freshness，组装 tensor 后送入有界模型队列。CPU/GPU 池按实测成本与时延选择，可按模型、服务等级或资源需求隔离。路由配置由控制面下发并在本地缓存，不让每个请求都同步访问 registry。trace 贯穿特征、排队、执行与返回。"
+      },
+      {
+        "title": "让离线与在线共享可验证合约",
+        "body": "特征定义和预处理版本写入模型 manifest，训练数据需避免未来信息和不可复现的时间 join，线上用同一语义实现并做 golden parity 检查。这里不要求训练与在线用完全相同的存储系统，而要求同一输入的含义一致。记录实际服务时的版本和必要特征诊断摘要，支持排查 training-serving skew；不要把原始敏感样本无差别保留。"
+      },
+      {
+        "title": "分离发布风险与流量风险",
+        "body": "发布顺序是制品校验、合约测试、目标硬件加载与 warm-up、shadow/canary、按证据扩量。流量扩容则根据队列、可用容量和已知饭点提前预热，90 秒启动期间新 Pod 不计有效容量。保留兼容的旧温热池和特征路径用于回滚，限制新旧共存的显存峰值；registry 或控制面短暂故障时，数据面继续使用最近已验证配置。"
+      },
+      {
+        "title": "用隔离和降级避免共享故障",
+        "body": "为租户设置 in-flight、队列和资源配额，重要模型可用独立池防止 noisy neighbor，长短 shape 必要时分桶。昂贵租户超限不能挤掉所有其他团队。降级可以是更轻且已评估的模型、减少候选或有界旧特征；逐项说明质量损失，不能把缺失特征随便填零。依赖过载时快速拒绝或隔离，限制重试，避免故障沿共享 Redis、GPU 池传播。"
+      },
+      {
+        "title": "闭环评估而非只有 uptime",
+        "body": "运行指标包括端到端分布、错误/超时/fallback、队列年龄、样本吞吐、batch、资源与成本；数据指标包括 freshness、缺失、schema 和分布变化；模型质量用成熟标签按地区、时段和用户群分析。预测日志以 model/feature/config version 关联反馈，并处理延迟与偏差。分布漂移只是调查信号，不能自动等同于质量下降或无条件触发重训。"
+      }
+    ],
+    "architecture": "控制面：registry → 合约/评估 → 发布/路由配置\n                         ↓\n请求 → 网关准入 → 版本路由 → 特征批量读取\n                              ↓\n                   schema / freshness 检查\n                              ↓\n                 有界队列 → CPU / GPU 模型池\n                              ↓\n                       后处理 → 预测响应\n日志/trace → 运行监控 + 成熟标签质量评估",
+    "calculation": {
+      "problem": "练习假设：2400 requests/s、每请求50候选；目标硬件实测每 GPU 在给定 shape 与配置下可处理20000 samples/s，规划只使用70%验证容量。",
+      "steps": [
+        "评分工作量 = 2400×50 = 120000 samples/s，而不是2400 samples/s。",
+        "每 GPU 规划有效承载 = 20000×0.7 = 14000 samples/s。",
+        "GPU 数估算 = ceil(120000/14000) = 9；这是模型计算侧估算，不含特征存储或故障冗余的独立容量要求。"
+      ],
+      "conclusion": "数字是练习假设，不能当作某个模型或 DoorDash 的真实 benchmark；shape、batch、共置和故障都会改变容量，需要端到端压测验证。"
+    },
+    "followups": [
+      {
+        "question": "为什么模型 registry 不放在每次请求的同步路径上？",
+        "answer": "registry 是制品与版本的控制面，如果每次预测都同步查询它，会给低延迟数据面增加额外依赖与故障传播。更常见的做法是发布经过验证的路由 manifest，由数据面缓存并按版本原子切换；模型制品提前加载。控制面失联时继续使用最近可信配置，并监控配置陈旧度。涉及紧急撤销的场景要有明确传播与失效策略，不能无限忽略控制面变化。",
+        "signal": "控制面故障与数据面可用性解耦。"
+      },
+      {
+        "question": "40K QPS 的后端经验可以直接证明能做这个平台吗？",
+        "answer": "可以用来说明你熟悉分片、背压、容量规划和故障定位，但不能只比较 QPS。ML 请求可能含几十个候选，不同 shape 的计算量不同，模型还需要加载、预热和质量验证。回答时先把原有能力映射到入口限流、特征 RPC 与隔离，再明确补充 samples/s、设备执行曲线、特征时间语义和模型发布合约。不要编造自己已经运营过某类 GPU 模型池。",
+        "signal": "经验迁移的准确性与学习边界。"
+      },
+      {
+        "question": "所有模型共用 GPU 池更省钱，为什么还需要隔离？",
+        "answer": "共享池能提高利用率，但大模型加载、长请求、显存峰值或异常租户可能使其他模型 OOM 或延迟突增。先按资源形状和服务等级分组，设置租户配额、并发限制与可观察的调度公平性；关键低延迟模型可用专用池，长尾低流量模型再共享。验收应看每租户 SLO 与单位有效预测成本，平均 GPU 利用率提高不代表整体服务更好。",
+        "signal": "成本、noisy neighbor 与尾延迟隔离。"
+      },
+      {
+        "question": "特征存储挂了，模型本身还健康，能怎么降级？",
+        "answer": "先区分每种特征的必须性与允许陈旧时间。可容忍短时陈旧的字段使用带年龄上限的缓存；训练时明确支持缺失的字段使用同一缺失编码；必要时切到不依赖故障特征的轻量模型或规则。没有验证就不能随意补零继续预测。降级路径要尽量独立于同一故障存储，并单独记录 fallback 原因、覆盖率和后续质量，恢复时渐进刷新防止再次冲垮存储。",
+        "signal": "数据依赖故障与语义正确性。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“2400 QPS 就只需要每秒做2400次样本计算。”",
+        "fix": "按候选数、每请求样本数与模型图 fan-out 展开工作量，并区分逻辑读与物理 RPC。"
+      },
+      {
+        "mistake": "“模型都是 GPU 服务，直接上 Kubernetes HPA。”",
+        "fix": "先测 CPU/GPU 的成本与时延，解释模型预热和扩容延迟，HPA 不是完整容量策略。"
+      },
+      {
+        "mistake": "“有 Prometheus 和 tracing 就完成 ML monitoring。”",
+        "fix": "还需特征 freshness/schema、版本、fallback 与成熟标签质量，系统成功不等于预测有效。"
+      }
+    ],
+    "bridge": "把你已有的高 QPS、Kafka/Flink、Redis 和 K8s 经验分别接到准入、实时特征、批量读取与容量隔离上。接着主动指出 ML 新增边界：时间正确的训练数据、版本化输入合约、设备与样本计算量、warm-up、慢反馈质量。这样的回答既能展示迁移能力，也不会冒充已有 ML 平台经历。",
+    "english": "I would size the platform in samples per second, not only requests per second, and validate capacity with representative model shapes. The data plane would handle admission, version routing, feature validation, and bounded inference queues, while the control plane would manage immutable artifacts and safe rollouts. Warm capacity is required because model startup is slower than a sudden traffic burst. I would monitor both system SLOs and ML-specific signals such as feature freshness, fallback rates, and quality on mature labels.",
+    "exercise": {
+      "task": "用40分钟做一次系统设计模拟：5分钟澄清，10分钟估算与图，15分钟深挖特征和 serving，10分钟故障与回滚。",
+      "deliverable": "一页架构图、容量计算、三个故障演练以及90秒英文总结。",
+      "checks": [
+        "算出120000 samples/s和9个GPU的练习估计，且标出假设与余量。",
+        "图上能追踪一次请求从特征版本到模型版本再到预测日志。",
+        "三个故障覆盖特征存储不可用、模型冷启动未就绪、一个租户过载，并各有具体动作。"
+      ]
+    },
+    "rubric": [
+      "需求澄清包括候选数、shape、freshness 与质量目标。",
+      "工作量单位和容量计算准确。",
+      "控制面和数据面职责明确。",
+      "发布、回滚与突发容量都处理冷启动。",
+      "故障处理保持特征与预测语义，且质量可观测。"
+    ]
+  },
+  "eta-long-tail": {
+    "basis": "主题衍生演练；未读取文章原文，不是原文摘要",
+    "title": "设计 ETA 预测：平均更准，为什么最慢的订单反而更糟？",
+    "minutes": 45,
+    "paraphrase": [
+      "题意转述：为外卖订单预测“还有多久送到”，既要在用户询问时快速返回，也要避免在极端天气、热门商家或长距离订单上严重低估。平均误差下降不一定代表用户体验全面改善，少量长尾订单可能遭受更大损失。本题依据 ETA 与长尾主题自编，文章原文未读，下面的架构与答案是教学方案而非内部系统描述。",
+      "ETA 的难点往往不是先选择哪种算法，而是定义预测时点、真实到达标签、当时可用的特征以及误差代价。下单时、商家出餐后、骑手取餐后是不同信息条件下的问题；训练时如果把后面才知道的出餐时间放进下单时样本，离线成绩会异常漂亮，线上却无法复制。长尾评估还需要区分模型误差尾部与系统响应延迟 p99。"
+    ],
+    "prompt": "自编设计题：设计下单时的端到端 ETA 服务，同时允许订单途中更新。练习假设峰值 10K 预测/秒，服务 p99 目标 80ms，标签由真实送达事件产生。新模型平均绝对误差改善，但暴雨与繁忙商家切片低估更严重。如何建数据、设计 serving、评估与安全发布？",
+    "clarify": [
+      "预测的是一个时间点、区间还是承诺送达上界？如果低估的代价显著更高，应讨论分位预测或区间及校准，而非只优化对称平均误差。",
+      "下单时与途中更新是否用同一模型和 schema？不同阶段可见特征不同，应明确阶段标记或分开模型，并分别评估，不能混在一个 MAE 里。",
+      "取消、失败送达、异常缺失标签如何定义？它们不是“耗时 0”的订单；需要明确排除、单独结果指标或适合删失问题的方法。"
+    ],
+    "concepts": [
+      {
+        "term": "MAE · 平均绝对误差",
+        "explanation": "把每个预测与实际结果的差取绝对值再平均。容易解释为平均差几分钟，但样本多的常见订单会主导它。"
+      },
+      {
+        "term": "Signed residual · 有符号残差",
+        "explanation": "例如定义实际耗时减预测耗时：正数表示低估。绝对误差不区分高估和低估，因此还要观察低估概率与严重程度。"
+      },
+      {
+        "term": "Quantile / calibration · 分位预测与校准",
+        "explanation": "若给出 90% 分位 ETA，希望约 90% 的合适订单在该时间内送达；是否兑现要用成熟数据分群检验，不是把点预测随意加固定分钟数。"
+      },
+      {
+        "term": "Point-in-time correctness · 预测时点正确性",
+        "explanation": "训练只能使用预测时已经发生且系统当时已经可获得的信息。事件发生在预测前、但上报在预测后，也可能是当时不可见的未来信息。"
+      }
+    ],
+    "tests": [
+      "能围绕预测时点定义标签与可用信息，识别事件时间和可用时间不同造成的泄漏。",
+      "能区分总体误差、长尾误差、校准和服务延迟，提出具体的切片护栏。",
+      "服务设计有特征新鲜度、阶段语义、低成本降级与版本化上线计划。"
+    ],
+    "shortAnswer": "我会先定义下单时预测的总剩余时间和途中更新的阶段语义，日志保存 prediction_id、预测时点、当时可见特征及模型版本。训练按预测时可见信息连接成熟送达标签，取消和未完成订单单独定义，避免未来出餐时间泄漏。先用可解释基线，再比较端到端模型或分阶段方案；线上批量读取新鲜特征并设严格 deadline，超时走地域和商家基线。评估同时看 MAE、低估长尾、天气/商家切片与预测区间校准。平均改善不能覆盖关键切片退化，发布按这些护栏小流量验证。",
+    "deepAnswer": [
+      {
+        "title": "先把一条训练样本的时间含义写清楚",
+        "body": "对下单时预测，label 可以是实际送达时间减下单预测时间；途中更新则是送达时间减该次预测时间。每次预测拥有独立 ID、阶段与当时输入引用，不能把同一订单后来的特征补到早期预测上。特征 join 同时检查事件时间和可用时间：11:59 发生但 12:03 才收到的商家拥堵事件，不能用于 12:00 的历史样本。按时间切分训练测试，订单多次预测也需避免跨集合泄漏。"
+      },
+      {
+        "title": "模型形式服务于业务误差代价",
+        "body": "先建立距离、时段和商家统计等稳定基线，再选择直接预测总时间或分解备餐、等待、行驶等阶段。分阶段方案易定位问题、可复用阶段更新，但阶段误差相关、阶段边界有噪声；端到端模型能学联合关系，却更依赖足够覆盖的训练数据。若用户更怕严重低估，可以训练分位或区间输出，并通过成熟标签检查覆盖率和区间宽度；不能把各阶段 p90 简单相加声称得到总时间 p90。"
+      },
+      {
+        "title": "在线特征和降级必须与训练一致",
+        "body": "在线输入可包括预测时可见的距离、商家历史统计、当前队列代理信号、天气和供需状态；各特征标记事件年龄与缺失。服务按阶段选兼容 schema，批量读取共享特征，限制外部 RPC 数量和剩余 deadline。特征过旧或模型不可用时返回训练过/验证过的缺失处理或简单基线，并记录原因。降级本身可能改变低估风险，所以应对它单独测质量和可用率。"
+      },
+      {
+        "title": "发布依据包含长尾与观察偏差",
+        "body": "报告整体 MAE、signed residual、严重低估率、绝对误差高分位和预测区间覆盖率；再按天气、商家拥堵、地区、距离和阶段切片。切片样本少时报告不确定性，并结合反例分析，不要把一两单差异当稳健提升。未完成慢单会让早期评估偏乐观，必须等待适当成熟窗口并记录取消/未送达处理。线上还要看推理 p99、取消和用户反馈，分清模型预测误差的 p99 与服务响应延迟的 p99。"
+      }
+    ],
+    "architecture": "下单/更新请求 → 确定预测阶段与时间\n                    ↓\n可见特征 + freshness → ETA / 区间 → 用户\n                    ↓\n预测日志 ──┐\n送达/取消事件 → 成熟标签/结果定义\n                    ↓\n时间正确训练集 → 时间切分/长尾切片评估\n                    ↓\n版本化发布 → 小流量护栏 → 扩量或基线",
+    "calculation": {
+      "problem": "练习假设：100 单中，95 单是常见订单，5 单是暴雨长尾。旧模型常见订单绝对误差均为 3 分钟，长尾为 10 分钟；新模型分别为 2 分钟和 20 分钟，且长尾误差全部为低估。",
+      "steps": [
+        "旧整体 MAE = (95×3 + 5×10)/100 = 3.35 分钟。",
+        "新整体 MAE = (95×2 + 5×20)/100 = 2.90 分钟，整体降低约 13.4%。",
+        "暴雨切片 MAE 却从 10 增加到 20 分钟；按此 100 条数据的 nearest-rank 定义，绝对误差 p99 从 10 升到 20 分钟。",
+        "长尾只有 5 单，这里用于展示均值可掩盖退化；实际发布还要扩大样本、报告不确定性并检查严重低估护栏。"
+      ],
+      "conclusion": "“平均更准”与“重要长尾更安全”是不同判断。本例不能支持全量发布，也不能把误差 p99 的分钟数和服务 p99 的毫秒数混在同一 SLO 中。"
+    },
+    "followups": [
+      {
+        "question": "把备餐 p90、等待 p90、行驶 p90 相加，就是总 ETA 的 p90 吗？",
+        "answer": "一般不是。分位数不可简单相加，各阶段还可能受同一拥堵或天气因素影响而相关。总时间的分布需要联合建模、保持依赖结构的样本模拟，或直接对总剩余时间做分位预测。即便各阶段单独校准良好，也要对最终总时间区间重新检查覆盖率。工程上可以给阶段分配时间预算，但那是设计约束，不是统计上的总时间分位数恒等式。",
+        "signal": "理解阶段相关性与分位数的非可加性。"
+      },
+      {
+        "question": "取消订单没有送达时间，把它过滤掉有什么问题？",
+        "answer": "过滤会改变目标人群：最慢或最差体验的订单可能更容易取消，只在成功送达订单上评估会过于乐观。必须明确 ETA 模型的目标是成功送达条件下的时间，还是所有订单的结果体验；对取消/失败另设结果指标和护栏。若要推断未观察的送达时间，需要专门的删失假设与方法，不能直接填 0、当前等待时间或一个臆造标签。",
+        "signal": "识别缺失标签背后的选择机制而非机械清洗。"
+      },
+      {
+        "question": "途中每分钟更新 ETA，会不会让离线成绩虚高？",
+        "answer": "会有这种风险。快到达时信息更充分、预测更容易，如果把所有阶段混合，增加晚期预测就能让总体误差下降，却未改善下单时承诺。按阶段或距下单时间固定评估口径，保留每次预测 ID，并按订单分组控制相关样本和数据切分。同时看更新稳定性，避免每分钟大幅跳变破坏体验；新信息可以修正预测，但不能用频繁更新掩盖早期失准。",
+        "signal": "能够定义持续预测系统的公平评估单位。"
+      },
+      {
+        "question": "极端天气样本很少，怎样保护长尾又不凭空造数据？",
+        "answer": "先使用可解释的地区/天气基线、区间和限域护栏，并用真实历史事件做时间留出的场景评估，明确样本量。可以在训练中重采样或加权真实长尾样本，但评估仍应分别报告自然分布和目标切片，不能让重采样比例伪装成真实发生率。模拟故障可检验服务稳健性，却不能证明真实预测精度。新事件到来后收集成熟标签，逐步验证是否需要专项模型或校准。",
+        "signal": "在稀少证据下保守处理风险，区分训练技巧和真实效果证据。"
+      }
+    ],
+    "pitfalls": [
+      {
+        "mistake": "“训练用最终实际出餐时间，特征更强。”",
+        "fix": "下单时不可获得的信息不能入该时点训练样本；途中模型则按其预测时点重新定义可见特征。"
+      },
+      {
+        "mistake": "“总体 MAE 改善就可以覆盖暴雨切片退化。”",
+        "fix": "预先定义关键切片与严重低估护栏，结合样本量和不确定性决定发布。"
+      },
+      {
+        "mistake": "“预测误差 p99 和推理延迟 p99 是一个指标。”",
+        "fix": "前者衡量分钟级预测偏差，后者衡量毫秒级服务响应，两者分别监控与验收。"
+      }
+    ],
+    "bridge": "你可以用 Flink 事件时间、水位与迟到事件经验解释特征何时真正可见，用 Go/K8s 保障推理 deadline 和基线可用性。需要新补的是标签定义、取消导致的选择偏差、分位预测校准，以及持续预测中不同阶段不能随意混合评价。",
+    "english": "I would define ETA relative to a specific prediction time and stage. Training features must have been available at that moment, not merely have an earlier event timestamp. I would evaluate mean error, severe underestimation, tail slices, and interval calibration separately. A better average cannot justify a rollout that makes an important long-tail segment materially worse.",
+    "exercise": {
+      "task": "构造算例的 100 条误差记录，计算整体与暴雨切片指标；再画下单 12:00、拥堵事件 11:59、事件上报 12:03、送达 12:40 的时间线，判断不同预测时点可用的信息。",
+      "deliverable": "指标表、预测时点特征表、一条明确的长尾发布护栏。",
+      "checks": [
+        "得到 MAE 3.35→2.90，同时暴雨切片 10→20，说明为何不能只看平均。",
+        "12:00 的训练样本不能使用 12:03 才可见的拥堵事件；12:05 更新样本可按其他契约使用。",
+        "分别列出预测误差护栏和推理延迟护栏，并对 5 条长尾样本标注证据不足的限制。"
+      ]
+    },
+    "rubric": [
+      "每次预测有明确阶段、时点和 label 定义。",
+      "特征同时满足事件时间与当时可用时间。",
+      "能算清平均改善却长尾恶化的例子。",
+      "区间/分位预测需要校准，阶段分位不能直接求和。",
+      "取消、途中更新和稀有事件都有不伪造数据的处理方案。"
+    ]
+  }
+};

@@ -1,55 +1,49 @@
 # 交付验证
 
-2026-10-28，在实际 Linux 环境的 Chromium 中运行。
+2026-11-05，在实际 Linux 环境的 Chromium 中完成完整回归。
 
-## 已通过
+## 完整解析与内容复核
 
-- JavaScript：app.js、curriculum.js 语法检查。
-- Python 参考实现：10 项合同测试全部通过。
-- 浏览器：12 组场景全部通过，0 个未捕获 JavaScript 错误：
-  - 21 节完整课程、42 道检测、唯一 ID、先修/资源引用、14 天计划覆盖全部课程。
-  - 任务刷新持久化，14/21 天切换保留进度。
-  - 课程和英文术语搜索，包括无结果状态。
-  - 错题收集、重答纠正、检测任务自动完成、笔记转义与间隔复习。
-  - 批处理过载排队、低负载等待取舍、非法参数及 KV 4/16 GiB 计算。
-  - STAR/设计草稿持久化、题库筛选、随机抽题和计时结束。
-  - 实战 ZIP 下载，进度导出、清空、导入完整往返；非法导入保留原数据。
-  - 全部课程路由、全部任务完成状态、项目子路径部署。
-  - 390px 手机端无横向溢出，底部导航、课程与架构交互。
-  - 真正断网刷新、跨课程切换、样式与已缓存实战 ZIP。
-  - 实际离线 ZIP 解压后再次运行网站与断网刷新。
-  - ZIP 内 reference 的 10 项测试通过；starter 因未实现而按预期失败。
-- 三个 ZIP 的 CRC 完整性通过。site-deploy.zip 是可直接上传的静态托管包。
+- 23 个来源全部有独立中文解析页；92 个不同追问均有对应答案。
+- 每页提供题意转述、澄清、概念、考点、口述答案、分层答案、架构、计算示例、易错点、英文表达、动手产出与验收依据。
+- Serving、Feature Platform、System Design 三组内容分别复核了来源、技术边界与算术。EPCAS 的 requests/limits 行为核对到固定提交源码；统计区间使用未提前舍入的标准误。
+- 6 份官方原文重新读取成功，17 条索引的原文未读状态保留。0 条已核验候选人专项面经；自编题和答案没有标成原题或官方答案。
+- RESEARCH.md 由网页同一份数据生成，包含完整答案，不是只有链接的清单。
 
-## 外链检查的实际限制
+## 15 组浏览器场景全部通过
 
-16 个原文链接均已发起 GET 检测。当前出站代理对所需官方域名返回 CONNECT 403，无法到达目标服务器，因此不能判断页面是否仍存在，不能标记为通过或 404。网络域名已保留在环境配置草稿中。应用网络设置后运行：
+- 原有 21 节课程、42 道检测、14/21 天路线、任务与进度持久化。
+- 资料来源标注、全文搜索、筛选、收藏、已读、笔记转义及旧备份兼容。
+- 23 个详情页均可访问，短答案和详细答案直接可读，追问可单独或全部展开。
+- 答案内容可被搜索命中；详情页笔记刷新保留，非法来源 ID 安全回退。
+- 完整答案手册可下载，内容与网页数据一致。
+- 错题、复习、STAR、系统设计草稿、模拟器、计时器和进度导入导出。
+- 390px 手机端，包括完整解析及展开追问，无横向页面溢出。
+- 真正断网后刷新详情页，答案、架构、来源记录和答案手册均可访问。
+- 下载的 offline.zip 解压后实际运行及断网测试通过。
+- 实战包 reference 的 10 项测试通过；starter 按练习设计抛出未实现错误。
+- 0 个未捕获 JavaScript 错误；JavaScript/Python 语法和 diff 检查通过。
 
-    python3 tests/check_links.py
+截图和机器可读报告在被忽略的 test-results/。统计区间舍入文案在完整回归后修正并重新构建，不改变交互行为。
 
-区分“环境网络策略阻挡”和“目标页面 HTTP 失败”。岗位页面尤其可能随招聘关闭而下线。无需联网即可阅读全部站内课程、英文表达、参考架构与实战。
+## 网络与部署边界
 
-## 部署
+本轮仅重试一篇 DoorDash 原文和一个 Reddit 搜索入口，仍被代理 CONNECT 403 拦截；不将网络限制报告为文章不存在，也没有声称获得新的候选人面经。官方 GitHub 文档可读，检索记录及固定提交证据见 research-audit.json。
 
-已成功推送部署分支 codex/ml-infra-prep；main 分支保持原样。实际云端运行 https://github.com/yuh2k/PERSONAL/actions/runs/40740040949 的 JavaScript 检查、10 项参考测试和静态构建已通过，部署在 actions/configure-pages 阶段失败：Get Pages site failed / HTTP 404，仓库尚未启用 GitHub Pages。
+部署工作流位于仓库根目录 .github/workflows/deploy-ml-infra.yml，部署分支为 codex/ml-infra-prep。最近已核验的云端失败发生在 actions/configure-pages：仓库尚未启用 Pages，返回 HTTP 404。默认 GITHUB_TOKEN 不能自行启用 Pages；管理员需在仓库 Settings → Pages 的 Source 选择 GitHub Actions。只有部署成功且实际验证网址后，才可称为线上交付。
 
-需仓库管理员在 https://github.com/yuh2k/PERSONAL/settings/pages 的 Build and deployment → Source 选择 GitHub Actions，然后重跑工作流。官方 actions/configure-pages 说明默认 GITHUB_TOKEN 无法自行启用 Pages，因此不能在没有所需管理能力时声称已发布。
+工作流在 Pages 配置前上传 ml-infra-ready-to-use 构建产物，包含完整 site-deploy.zip、offline.zip 和 labs.zip。即使托管配置未启用，更新后的离线包和部署包仍可下载使用。
 
-工作流会在部署前先保存 ml-infra-ready-to-use 构建产物，包含 site-deploy.zip、offline.zip 和 labs.zip；即使 Pages 设置未完成也能下载交付包。Pages 成功后仍需实际 HTTP 验证 URL。当前运行环境的 GitHub API 和托管域名访问还受 CONNECT 403 限制。环境配置发布不等于网站部署。
-
-## 复现命令
+## 复现
 
     cd /workspace/PERSONAL/ml-infra-prep
     python3 build.py
     node --check app.js
     node --check curriculum.js
+    node --check interviews.js
+    node --check interview-guides.js
+    node --check interview-ui.js
     PYTHONPATH=labs/reference python3 -m unittest discover -s labs -v
     python3 tests/browser_test.py
 
-浏览器结果、截图与链接明细存于被忽略的 test-results/。默认 starter 测试失败是练习契约，不是环境故障。所有演示容量和系统图均为备考假设，不宣称是 DoorDash 内部事实。
-
-## 面经资料库本次验证
-
-完整 Chromium 回归扩展到 13 组场景，全部通过。新增检索类型/主题筛选、零候选人面经提示、来源完整性、收藏/已读、笔记转义、旧备份兼容和含收藏的新备份导入导出；390px 移动布局与真正断网访问资料库均通过。ZIP 中 10 项参考测试继续通过。
-
-数据明确记录 0 条已核验候选人专项面经、6 份已读官方技术资料、17 条精选文章索引及 30 道不同的自行编写追问（42 条资料关联）。没有把索引或官网材料统计为面经。研究范围、查询和限制见 RESEARCH.md / research-audit.json。
+构建无需安装应用依赖。浏览器验证需要 Python Playwright 和 Chromium；当前环境均已具备。

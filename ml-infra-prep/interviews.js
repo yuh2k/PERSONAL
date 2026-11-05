@@ -98,7 +98,7 @@ const INTERVIEW_RESEARCH = {
       "id": "official-epcas",
       "title": "Elastic Pod CPU Auto-Scaler",
       "url": "https://github.com/doordash-oss/elastic-cpu-pod-autoscaler",
-      "evidenceUrl": "https://raw.githubusercontent.com/doordash-oss/elastic-cpu-pod-autoscaler/main/README.md",
+      "evidenceUrl": "https://github.com/doordash-oss/elastic-cpu-pod-autoscaler/blob/700dd4e664e7ee84be623cf43448e8acaa108e5f/src/main/java/io/elasticcpu/operator/resize/PodResizeActuator.java#L137",
       "date": "文档发表日期未标注",
       "role": "DoorDash OSS · 技术资料，无候选人岗位信息",
       "kind": "official",
@@ -112,7 +112,7 @@ const INTERVIEW_RESEARCH = {
         "Autoscaling",
         "CPU"
       ],
-      "summary": "原文已读。通过 Kubernetes Pod resize 子资源原地调整容器 CPU requests，重点是避免敏感服务重启。 从 kubelet cAdvisor 采集 CPU usage 和 throttling，通过 API server node proxy 访问，不依赖 Prometheus。",
+      "summary": "原文与实现已核对。通过 Kubernetes Pod resize 子资源原地调整容器 CPU；所核验实现同时更新 requests.cpu 和 limits.cpu。它从 kubelet cAdvisor 采集 CPU usage 与 throttling，通过 API server node proxy 访问，减少扩容引起的服务重启。",
       "reportedQuestions": [],
       "followups": [
         "模型服务不希望重启，CPU 突发时原地扩 CPU、HPA 和 warm replicas 如何取舍？",
@@ -127,7 +127,7 @@ const INTERVIEW_RESEARCH = {
         "capacity"
       ],
       "caveat": "这是公开技术文档，不是候选人面经，不证明 DoorDash 本次会问这些问题。文档 main 分支可能更新，配置应与实际版本核对。",
-      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：EPCAS is a Kubernetes operator for restart-free vertical CPU scaling; it watches ElasticWorkloadPolicy, samples CPU usage/throttling, and changes CPU requests via Pod resize."
+      "provenance": "官方 README 与固定提交 700dd4e664e7ee84be623cf43448e8acaa108e5f 的 PodResizeActuator.java 已读取。buildPatch 将 requests.cpu 与 limits.cpu 同时设为目标值；requests 的资源预留语义与 limits 的节流上限语义仍需分别解释。"
     },
     {
       "id": "official-agentico",
@@ -196,7 +196,7 @@ const INTERVIEW_RESEARCH = {
       "id": "nvidia-batching",
       "title": "Triton Inference Server — Batchers",
       "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md",
-      "evidenceUrl": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/batcher.md",
+      "evidenceUrl": "https://github.com/triton-inference-server/server/blob/25419f909746139d2bffc6c7dac351f8c95039e4/docs/user_guide/batcher.md#L53",
       "date": "文档发表日期未标注",
       "role": "NVIDIA / Triton · 技术资料，无候选人岗位信息",
       "kind": "official",
@@ -224,13 +224,13 @@ const INTERVIEW_RESEARCH = {
         "triton"
       ],
       "caveat": "这是公开技术文档，不是候选人面经，不证明 DoorDash 本次会问这些问题。文档 main 分支可能更新，配置应与实际版本核对。",
-      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：The documentation recommends starting with default dynamic_batching, measuring latency/throughput, and says preferred_batch_size should not be used for most models."
+      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：The documentation recommends starting with default dynamic_batching, measuring latency/throughput, and says preferred_batch_size should not be used for most models. 本轮重新读取并固定到官方提交 25419f909746139d2bffc6c7dac351f8c95039e4；配置与指标仍需对应实际部署版本。"
     },
     {
       "id": "nvidia-model-config",
       "title": "Triton Inference Server — Model Configuration",
       "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md",
-      "evidenceUrl": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/model_configuration.md",
+      "evidenceUrl": "https://github.com/triton-inference-server/server/blob/25419f909746139d2bffc6c7dac351f8c95039e4/docs/user_guide/model_configuration.md#L676",
       "date": "文档发表日期未标注",
       "role": "NVIDIA / Triton · 技术资料，无候选人岗位信息",
       "kind": "official",
@@ -255,13 +255,13 @@ const INTERVIEW_RESEARCH = {
         "deployment"
       ],
       "caveat": "这是公开技术文档，不是候选人面经，不证明 DoorDash 本次会问这些问题。文档 main 分支可能更新，配置应与实际版本核对。",
-      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：Batching requires compatible first batch dimensions on all inputs/outputs; non-batching models must use max_batch_size=0. Model instances are served after successful configured warm-up."
+      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：Batching requires compatible first batch dimensions on all inputs/outputs; non-batching models must use max_batch_size=0. Model instances are served after successful configured warm-up. 本轮重新读取并固定到官方提交 25419f909746139d2bffc6c7dac351f8c95039e4；配置与指标仍需对应实际部署版本。"
     },
     {
       "id": "nvidia-metrics",
       "title": "Triton Inference Server — Metrics",
       "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md",
-      "evidenceUrl": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/metrics.md",
+      "evidenceUrl": "https://github.com/triton-inference-server/server/blob/25419f909746139d2bffc6c7dac351f8c95039e4/docs/user_guide/metrics.md#L63",
       "date": "文档发表日期未标注",
       "role": "NVIDIA / Triton · 技术资料，无候选人岗位信息",
       "kind": "official",
@@ -287,7 +287,7 @@ const INTERVIEW_RESEARCH = {
         "observability"
       ],
       "caveat": "这是公开技术文档，不是候选人面经，不证明 DoorDash 本次会问这些问题。文档 main 分支可能更新，配置应与实际版本核对。",
-      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：Metrics distinguish Request Count, Inference Count and Execution Count; average batch size is Inference Count / Execution Count. Latency counters are cumulative durations, not percentiles."
+      "provenance": "已读取官方原文（HTTP 200）。可见材料说明：Metrics distinguish Request Count, Inference Count and Execution Count; average batch size is Inference Count / Execution Count. Latency counters are cumulative durations, not percentiles. 本轮重新读取并固定到官方提交 25419f909746139d2bffc6c7dac351f8c95039e4；配置与指标仍需对应实际部署版本。"
     },
     {
       "id": "dd-index-65",

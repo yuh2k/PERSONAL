@@ -79,6 +79,36 @@ def run():
             page.locator('[data-research-reset]').first.click()
             page.screenshot(path=str(OUT/'research-desktop.png'))
             passed("Research provenance counts, source/search filters, saved/read/escaped notes and old-backup compatibility")
+
+            # Readable answers must exist on every source, including offline, not only external links.
+            assert page.evaluate("Object.keys(INTERVIEW_GUIDES).length") == 23
+            assert page.evaluate("INTERVIEW_RESEARCH.entries.every(e=>Object.hasOwn(INTERVIEW_GUIDES,e.id))")
+            assert page.evaluate("Object.values(INTERVIEW_GUIDES).every(g=>g.paraphrase.length>=2&&g.clarify.length>=3&&g.concepts.length>=3&&g.deepAnswer.length>=4&&g.followups.length>=4&&g.followups.every(f=>f.question&&f.answer&&f.signal)&&g.calculation.steps.length>=2&&g.exercise.checks.length>=3)")
+            query=page.evaluate("INTERVIEW_GUIDES['nvidia-batching'].followups[0].answer.slice(0,25)")
+            page.locator('#research-search').fill(query)
+            expect(page.locator('[data-research-id="nvidia-batching"]')).to_be_visible()
+            page.locator('a[href="#interview/nvidia-batching"]').first.click()
+            expect(page.locator('.interview-guide')).to_be_visible()
+            expect(page.locator('#guide-answer').locator('..')).to_contain_text(page.evaluate("INTERVIEW_GUIDES['nvidia-batching'].shortAnswer"))
+            expect(page.locator('nav a[href="#interviews"]')).to_have_attribute('aria-current','page')
+            page.locator('[data-guide-expand]').click()
+            expect(page.locator('#guide-followups').locator('..').locator('details[open]')).to_have_count(page.evaluate("INTERVIEW_GUIDES[location.hash.split('/')[1]].followups.length"))
+            note=page.locator('[data-research-note="nvidia-batching"]')
+            note.locator('xpath=ancestor::details/summary').click()
+            note.fill('模型实例繁忙时，凑批等待上限不等于总排队 deadline。')
+            page.reload()
+            expect(page.locator('[data-research-note="nvidia-batching"]')).to_have_value('模型实例繁忙时，凑批等待上限不等于总排队 deadline。')
+            page.screenshot(path=str(OUT/'interview-answer-desktop.png'))
+            with page.expect_download() as answerbook:
+                page.locator('a[download][href="./RESEARCH.md"]').first.click()
+            book=Path(answerbook.value.path()).read_text()
+            assert '60–90 秒参考回答' in book and '可能的追问与回答' in book
+            assert page.evaluate("INTERVIEW_GUIDES['nvidia-batching'].shortAnswer") in book
+            for invalid in ['missing-guide','__proto__','constructor']:
+                page.goto(url+'#interview/'+invalid)
+                expect(page.locator('main a[href="#interviews"]').first).to_be_visible()
+                assert page.locator('.interview-guide').count()==0
+            passed("Deep answers, answer-content search, followup reveal, detail notes, downloadable answer book and invalid routes")
             page.goto(url+'#home')
 
             page.locator('[data-task="foundations:read"]').check()
@@ -197,6 +227,12 @@ def run():
                 page.goto(url + "#lesson/" + lesson_id)
                 expect(page.locator(".article")).to_be_visible()
                 expect(page.locator(".quiz-question")).to_have_count(2)
+            for source_id in page.evaluate("INTERVIEW_RESEARCH.entries.map(e=>e.id)"):
+                page.goto(url+'#interview/'+source_id)
+                expect(page.locator('.interview-guide')).to_be_visible()
+                expect(page.locator('h1')).to_have_text(page.evaluate("INTERVIEW_GUIDES["+json.dumps(source_id)+"].title"))
+                expect(page.locator('#guide-followups').locator('..').locator('details')).to_have_count(page.evaluate("INTERVIEW_GUIDES[location.hash.split('/')[1]].followups.length"))
+            passed("All 23 complete interview-answer routes render with answered followups")
             page.evaluate("LESSONS.forEach(l=>TASKS.forEach(t=>state.tasks[l.id+':'+t.id]=true));persist()")
             page.goto(url + "#roadmap")
             assert page.locator('a[href="#lesson/undefined"]').count() == 0
@@ -206,7 +242,7 @@ def run():
             mobile = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, device_scale_factor=1, has_touch=True)
             mp = mobile.new_page()
             mp.on("pageerror", lambda error: errors.append(str(error)))
-            for route in ["home", "roadmap", "courses", "lesson/batching", "practice", "review", "resources", "interviews"]:
+            for route in ["home", "roadmap", "courses", "lesson/batching", "practice", "review", "resources", "interviews", "interview/nvidia-batching", "interview/dd-index-108"]:
                 mp.goto(url + "#" + route)
                 assert mp.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), route + " overflows mobile"
             mp.goto(url + "#home")
@@ -219,6 +255,10 @@ def run():
             mp.locator(".diagram").first.wait_for(state="attached")
             mp.goto(url+"#interviews")
             mp.screenshot(path=str(OUT/"research-mobile.png"))
+            mp.goto(url+'#interview/nvidia-batching')
+            mp.locator('[data-guide-expand]').click()
+            assert mp.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+            mp.screenshot(path=str(OUT/'interview-answer-mobile.png'))
             mobile.close()
             passed("390px mobile layouts, bottom navigation and responsive lesson/diagram")
 
@@ -235,6 +275,11 @@ def run():
             page.goto(url+"#interviews")
             expect(page.locator(".research-card")).to_have_count(23)
             assert page.evaluate("fetch('./research-audit.json').then(r=>r.ok)")
+            page.goto(url+'#interview/dd-index-108')
+            expect(page.locator('.interview-guide')).to_be_visible()
+            page.reload(wait_until='domcontentloaded')
+            expect(page.locator('#guide-answer').locator('..')).to_contain_text(page.evaluate("INTERVIEW_GUIDES['dd-index-108'].shortAnswer"))
+            assert page.evaluate("fetch('./RESEARCH.md').then(r=>r.text()).then(t=>t.includes(INTERVIEW_GUIDES['dd-index-108'].shortAnswer))")
             context.set_offline(False)
             passed("Actual network-off reload, cross-lesson navigation, styles and cached lab download")
             # Validate the actual downloadable artifact, not only source files.

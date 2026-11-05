@@ -24,6 +24,7 @@ jobs:
           node --check ml-infra-prep/app.js
           node --check ml-infra-prep/curriculum.js
           node --check ml-infra-prep/interviews.js
+          node --check ml-infra-prep/interview-guides.js
           node --check ml-infra-prep/interview-ui.js
       - name: Check lab reference
         working-directory: ml-infra-prep
