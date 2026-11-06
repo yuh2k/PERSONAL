@@ -1,0 +1,42 @@
+name: Verify public ML Infra website
+on:
+  push:
+    branches: [codex/ml-infra-prep]
+    paths: [".github/workflows/check-ml-infra-public.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify public HTTPS website and complete answers
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request
+          base = 'https://yuh2k.github.io/PERSONAL/'
+          for attempt in range(4):
+              try:
+                  def get(path):
+                      request = urllib.request.Request(base + path, headers={'User-Agent': 'ML-Infra-Site-Verification'})
+                      with urllib.request.urlopen(request, timeout=20) as response:
+                          assert response.status == 200
+                          return response.read().decode()
+                  page = get('')
+                  assert 'interview-guides.js' in page
+                  raw = get('interview-guides.js')
+                  prefix = "'use strict';\nconst INTERVIEW_GUIDES = "
+                  assert raw.startswith(prefix) and raw.endswith(';\n')
+                  guides = json.loads(raw[len(prefix):-2])
+                  assert len(guides) == 23
+                  assert sum(len(g['followups']) for g in guides.values()) == 92
+                  assert all(g['shortAnswer'] and g['deepAnswer'] for g in guides.values())
+                  assert '92' in get('RESEARCH.md')
+                  print('PUBLIC_SITE_VERIFIED: ' + base)
+                  print('HTTPS 200; 23 complete guides; 92 answered followups; answer book available.')
+                  break
+              except Exception:
+                  if attempt == 3:
+                      raise
+                  time.sleep(15)
+          PY
