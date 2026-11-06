@@ -1,0 +1,1226 @@
+{
+  "summary": {
+    "verified_ml_candidate_reports": 0,
+    "original_technical_sources_read": 6,
+    "selected_indexed_leads": 17,
+    "displayed_entries": 23,
+    "legacy_authored_practice_prompts": 30,
+    "legacy_practice_source_associations": 42,
+    "deep_dive_guides": 23,
+    "answered_followups": 92,
+    "worked_examples": 23,
+    "guide_origin": "authored_practice_not_candidate_reports"
+  },
+  "english": {
+    "scope": "Public English DoorDash ML System Design / ML Infrastructure Domain candidate experiences",
+    "confirmed_firsthand_ml_reports": [],
+    "important_conclusion": "No first-hand DoorDash ML account was verified in this constrained research. Do not count inaccessible guide pages or general backend reports as ML interview evidence.",
+    "platform_attempts": [
+      {
+        "platform": "Google search",
+        "url": "https://www.google.com/search?q=DoorDash+ML+infrastructure+interview+experience",
+        "status": "network_blocked",
+        "evidence": "URLError: Tunnel connection failed: 403 Forbidden"
+      },
+      {
+        "platform": "Reddit search",
+        "url": "https://www.reddit.com/search/?q=doordash%20machine%20learning%20interview",
+        "status": "network_blocked",
+        "evidence": "URLError: Tunnel connection failed: 403 Forbidden"
+      },
+      {
+        "platform": "LeetCode Discuss",
+        "url": "https://leetcode.com/discuss/interview-experience/?currentPage=1&orderBy=most_relevant&query=doordash",
+        "status": "network_blocked",
+        "evidence": "URLError: Tunnel connection failed: 403 Forbidden"
+      },
+      {
+        "platform": "InterviewQuery guide",
+        "url": "https://www.interviewquery.com/interview-guides/doordash-machine-learning-engineer",
+        "status": "network_blocked",
+        "evidence": "URLError: Tunnel connection failed: 403 Forbidden"
+      },
+      {
+        "platform": "Glassdoor company interviews",
+        "url": "https://www.glassdoor.com/Interview/DoorDash-Interview-Questions-E813073.htm",
+        "status": "network_blocked",
+        "evidence": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+      },
+      {
+        "platform": "Medium search",
+        "url": "https://medium.com/search?q=doordash%20machine%20learning%20interview",
+        "status": "network_blocked",
+        "evidence": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+      },
+      {
+        "platform": "Blind search",
+        "url": "https://www.teamblind.com/search/Doordash%20ML%20interview",
+        "status": "network_blocked",
+        "evidence": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+      }
+    ],
+    "github_search": {
+      "code_search": "HTTP 200 page but unauthenticated code results require sign-in",
+      "issue_search": "Multiple public queries succeeded; results primarily job/news bots. Narrower later queries hit HTTP 429; stopped search retries.",
+      "queries": [
+        "DoorDash machine learning",
+        "DoorDash ML interview",
+        "DoorDash system design",
+        "DoorDash domain interview",
+        "DoorDash MLE",
+        "DoorDash interview in:title"
+      ],
+      "excluded_report": {
+        "url": "https://github.com/checkDev/SwiftCompetitiveProgramming/issues/2",
+        "title": "Doordash reject",
+        "date": "2026-03-18 (GitHub search metadata)",
+        "evidence": "search result snippet only",
+        "summary": "Author notes failed OOP delivery backend API coding and system design needing more depth/articulation.",
+        "reason_excluded": "No ML role or ML-specific questions; not counted as ML面经."
+      }
+    },
+    "compilations_read": [
+      {
+        "repository": "khangich/machine-learning-interview",
+        "url": "https://github.com/khangich/machine-learning-interview",
+        "commit": "968a286650c964f8583b73b3e0864475b86f22b6",
+        "access": "cloned and read",
+        "classification": "general interview preparation compilation, not a DoorDash candidate report",
+        "findings": "DoorDash appears only as engineering case-study links; interview_experiences.md lists 11 reports from other companies and no DoorDash."
+      },
+      {
+        "repository": "alirezadir/Machine-Learning-Interviews",
+        "url": "https://github.com/alirezadir/Machine-Learning-Interviews",
+        "commit": "9ee330857b953e6e95376a901f8b12cd89bd2234",
+        "access": "cloned and read",
+        "classification": "general interview preparation compilation, not a DoorDash candidate report",
+        "findings": "Repository-wide case-insensitive door.?dash search returned no matches."
+      }
+    ],
+    "official_link_leads": [
+      {
+        "title": "Personalized store feed with vector embeddings",
+        "url": "https://blog.doordash.com/personalized-store-feed-with-vector-embeddings-251ad7a2c09a",
+        "publication_date": null,
+        "classification": "official article link discovered through a public curated compilation",
+        "original_article_access": "not read",
+        "candidate_experience": false,
+        "discovery_source": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/README.md#food-delivery"
+      },
+      {
+        "title": "Next-Generation Optimization for Dasher Dispatch at DoorDash",
+        "url": "https://doordash.engineering/2020/02/28/next-generation-optimization-for-dasher-dispatch-at-doordash/",
+        "publication_date": "2020-02-28 (URL path, original article not read)",
+        "classification": "official article link discovered through a public curated compilation",
+        "original_article_access": "not read",
+        "candidate_experience": false,
+        "discovery_source": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/appliedml.md#Doordash"
+      },
+      {
+        "title": "Retraining Machine Learning Models in the Wake of COVID-19",
+        "url": "https://doordash.engineering/2020/09/15/retraining-ml-models-covid-19/",
+        "publication_date": "2020-09-15 (URL path, original article not read)",
+        "classification": "official article link discovered through a public curated compilation",
+        "original_article_access": "not read",
+        "candidate_experience": false,
+        "discovery_source": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/appliedml.md#Doordash"
+      },
+      {
+        "title": "Supporting Rapid Product Iteration with an Experimentation Analysis Platform",
+        "url": "https://doordash.engineering/2020/09/09/experimentation-analysis-platform-mvp/",
+        "publication_date": "2020-09-09 (URL path, original article not read)",
+        "classification": "official article link discovered through a public curated compilation",
+        "original_article_access": "not read",
+        "candidate_experience": false,
+        "discovery_source": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/appliedml.md#Doordash"
+      },
+      {
+        "title": "Improving ETA Prediction Accuracy for Long-tail Events",
+        "url": "https://doordash.engineering/2021/04/28/improving-eta-prediction-accuracy-for-long-tail-events/",
+        "publication_date": "2021-04-28 (URL path, original article not read)",
+        "classification": "official article link discovered through a public curated compilation",
+        "original_article_access": "not read",
+        "candidate_experience": false,
+        "discovery_source": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/appliedml.md#Doordash"
+      }
+    ]
+  },
+  "chinese": {
+    "scope": "Chinese public DoorDash ML System Design / ML Infra Domain interview experiences",
+    "checked_at_utc": "2026-11-04T04:46:56.356066+00:00",
+    "verified_firsthand_reports": [],
+    "verified_reposted_ml_interview_reports": [],
+    "resources": [
+      {
+        "title": "DoorDash 避开 \"缓存风暴\"",
+        "primary_url": "https://blog.doordash.com/avoiding-cache-stampede-at-doordash-55bbf596d94b",
+        "verified_index_url": "https://github.com/carlos19960601/awesome-scalability-zh/blob/0c1dc62f5d1005436e4049db288987f4c70c7917/README.md#L143",
+        "index_language": "zh",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [DoorDash 避开 \"缓存风暴\"](https://blog.doordash.com/avoiding-cache-stampede-at-doordash-55bbf596d94b)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Chinese index"
+      },
+      {
+        "title": "DoorDash 搜索和推荐 ",
+        "primary_url": "https://blog.doordash.com/powering-search-recommendations-at-doordash-8310c5cfd88c",
+        "verified_index_url": "https://github.com/carlos19960601/awesome-scalability-zh/blob/0c1dc62f5d1005436e4049db288987f4c70c7917/README.md#L306",
+        "index_language": "zh",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [DoorDash 搜索和推荐 ](https://blog.doordash.com/powering-search-recommendations-at-doordash-8310c5cfd88c)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Chinese index"
+      },
+      {
+        "title": "DoorDash 强制超时：一种可靠性方法",
+        "primary_url": "https://doordash.engineering/2018/12/21/enforce-timeout-a-doordash-reliability-methodology/",
+        "verified_index_url": "https://github.com/carlos19960601/awesome-scalability-zh/blob/0c1dc62f5d1005436e4049db288987f4c70c7917/README.md#L540",
+        "index_language": "zh",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [DoorDash 强制超时：一种可靠性方法](https://doordash.engineering/2018/12/21/enforce-timeout-a-doordash-reliability-methodology/)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Chinese index"
+      },
+      {
+        "title": "实时预测在DoorDash",
+        "primary_url": "https://www.infoq.com/presentations/doordash-real-time-predictions",
+        "verified_index_url": "https://github.com/carlos19960601/awesome-scalability-zh/blob/0c1dc62f5d1005436e4049db288987f4c70c7917/README.md#L687",
+        "index_language": "zh",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [实时预测在DoorDash](https://www.infoq.com/presentations/doordash-real-time-predictions)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Chinese index"
+      },
+      {
+        "title": "Personalized store feed",
+        "primary_url": "https://blog.doordash.com/personalized-store-feed-with-vector-embeddings-251ad7a2c09a",
+        "verified_index_url": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/README.md#L148",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [Personalized store feed](https://blog.doordash.com/personalized-store-feed-with-vector-embeddings-251ad7a2c09a)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Doordash dispatch optimization",
+        "primary_url": "https://doordash.engineering/2020/02/28/next-generation-optimization-for-dasher-dispatch-at-doordash/",
+        "verified_index_url": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/README.md#L149",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "* [Doordash dispatch optimization](https://doordash.engineering/2020/02/28/next-generation-optimization-for-dasher-dispatch-at-doordash/)",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "How DoorDash is Scaling its Data Platform to Delight Customers and Meet Growing Demand",
+        "primary_url": "https://doordash.engineering/2020/09/25/how-doordash-is-scaling-its-data-platform/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L65",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "4. [How DoorDash is Scaling its Data Platform to Delight Customers and Meet Growing Demand](https://doordash.engineering/2020/09/25/how-doordash-is-scaling-its-data-platform/) `DoorDash` `2020`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Building a Scalable ML Feature Store with Redis, Binary Serialization, and Compression",
+        "primary_url": "https://doordash.engineering/2020/11/19/building-a-gigascale-ml-feature-store-with-redis/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L108",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "11. [Building a Scalable ML Feature Store with Redis, Binary Serialization, and Compression](https://doordash.engineering/2020/11/19/building-a-gigascale-ml-feature-store-with-redis/) `DoorDash` `2020`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Building Riviera: A Declarative Real-Time Feature Engineering Framework",
+        "primary_url": "https://doordash.engineering/2021/03/04/building-a-declarative-real-time-feature-engineering-framework/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L112",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "15. [Building Riviera: A Declarative Real-Time Feature Engineering Framework](https://doordash.engineering/2021/03/04/building-a-declarative-real-time-feature-engineering-framework/) `DoorDash` `2021`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Retraining Machine Learning Models in the Wake of COVID-19",
+        "primary_url": "https://doordash.engineering/2020/09/15/retraining-ml-models-covid-19/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L156",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "6. [Retraining Machine Learning Models in the Wake of COVID-19](https://doordash.engineering/2020/09/15/retraining-ml-models-covid-19/) `DoorDash` `2020`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Managing Supply and Demand Balance Through Machine Learning",
+        "primary_url": "https://doordash.engineering/2021/06/29/managing-supply-and-demand-balance-through-machine-learning/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L159",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "9. [Managing Supply and Demand Balance Through Machine Learning](https://doordash.engineering/2021/06/29/managing-supply-and-demand-balance-through-machine-learning/) `DoorDash` `2021`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Powering Search & Recommendations at DoorDash",
+        "primary_url": "https://doordash.news/company/powering-search-recommendations-at-doordash/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L184",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "17. [Powering Search & Recommendations at DoorDash](https://doordash.news/company/powering-search-recommendations-at-doordash/) `DoorDash` `2017`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Homepage Recommendation with Exploitation and Exploration",
+        "primary_url": "https://doordash.engineering/2022/10/05/homepage-recommendation-with-exploitation-and-exploration/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L251",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "80. [Homepage Recommendation with Exploitation and Exploration](https://doordash.engineering/2022/10/05/homepage-recommendation-with-exploitation-and-exploration/) `DoorDash` `2022`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Powering Search & Recommendations at DoorDash",
+        "primary_url": "https://doordash.engineering/2017/07/06/powering-search-recommendations-at-doordash/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L263",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "7. [Powering Search & Recommendations at DoorDash](https://doordash.engineering/2017/07/06/powering-search-recommendations-at-doordash/) `DoorDash` `2017`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      },
+      {
+        "title": "Personalized Store Feed with Vector Embeddings",
+        "primary_url": "https://doordash.engineering/2018/04/02/personalized-store-feed-with-vector-embeddings/",
+        "verified_index_url": "https://github.com/eugeneyan/applied-ml/blob/master/README.md#L329",
+        "index_language": "en",
+        "classification": "curated_technical_reference_not_interview_report",
+        "access": "GitHub index read successfully; linked original article not read",
+        "published_date": null,
+        "evidence": "7. [Personalized Store Feed with Vector Embeddings](https://doordash.engineering/2018/04/02/personalized-store-feed-with-vector-embeddings/) `DoorDash` `2018`",
+        "role": "not a candidate interview; production engineering reading",
+        "inclusion_note": "可列为有出处的扩展资料；不能把文章标题推导成 DoorDash 实际面试题。",
+        "priority": "Supplementary English archive; may duplicate other researcher"
+      }
+    ],
+    "blocked_sources": [
+      {
+        "url": "https://www.google.com/search?q=DoorDash+ML+面经",
+        "status": "outbound_proxy_CONNECT_403",
+        "meaning": "环境代理在到达网站前拒绝连接；未读取页面，不能判定网站有无相关帖子。"
+      },
+      {
+        "url": "https://www.1point3acres.com/bbs/",
+        "status": "outbound_proxy_CONNECT_403",
+        "meaning": "环境代理在到达网站前拒绝连接；未读取页面，不能判定网站有无相关帖子。"
+      },
+      {
+        "url": "https://www.nowcoder.com/search/all?query=doordash",
+        "status": "outbound_proxy_CONNECT_403",
+        "meaning": "环境代理在到达网站前拒绝连接；未读取页面，不能判定网站有无相关帖子。"
+      }
+    ],
+    "search_method": "Public GitHub repository/readme and issue search, then direct reads of public raw README content. No login/paywall bypass.",
+    "limits": [
+      "No web-search connector available in current tools.",
+      "GitHub issues search returned HTTP 429 for targeted follow-ups; retries stopped.",
+      "No verified Chinese firsthand ML Infra/System Design report in reachable corpus. Search result counts are not counts of relevant reports."
+    ],
+    "excluded": [
+      {
+        "url": "https://github.com/bryant-video/recruit_algo",
+        "title": "recruit_algo",
+        "evidence": "README table labels Binary Tree Max Path Sum as 2021 DoorDash VO",
+        "reason": "Only a generic coding question; not ML Domain/System Design evidence."
+      },
+      {
+        "url": "https://github.com/eufindwork/eufindwork.github.io",
+        "title": "EU internship/job guide",
+        "reason": "DoorDash mention concerns Wolt job opportunities, not the requested interview topics."
+      },
+      {
+        "url": "https://github.com/hphphpcat/csvosupportIntroduction",
+        "title": "vo辅助oa辅助oa辅导",
+        "reason": "Commercial assistance listing; not read or accepted as a credible candidate report."
+      }
+    ],
+    "source_commits": {
+      "carlos19960601/awesome-scalability-zh": "0c1dc62f5d1005436e4049db288987f4c70c7917",
+      "khangich/machine-learning-interview": "968a286650c964f8583b73b3e0864475b86f22b6",
+      "eugeneyan/applied-ml": null
+    }
+  },
+  "official": {
+    "scope": "Official background only; none of these entries is a candidate interview report or a confirmed DoorDash interview question.",
+    "checked_at": "2026-11-05",
+    "network": "Direct careersatdoordash.com and doordash.engineering requests fail at CONNECT with proxy 403. Official public GitHub repositories and raw.githubusercontent.com are readable.",
+    "verified_sources": [
+      {
+        "id": "official-epcas",
+        "title": "Elastic Pod CPU Auto-Scaler",
+        "publisher": "DoorDash OSS",
+        "url": "https://github.com/doordash-oss/elastic-cpu-pod-autoscaler",
+        "read_url": "https://raw.githubusercontent.com/doordash-oss/elastic-cpu-pod-autoscaler/main/README.md",
+        "published_date": null,
+        "date_note": "README publication date not stated; copyright 2026 is not a publication date.",
+        "kind": "官方开源资料",
+        "access": "原文已读，HTTP 200",
+        "evidence": "EPCAS is a Kubernetes operator for restart-free vertical CPU scaling; it watches ElasticWorkloadPolicy, samples CPU usage/throttling, and changes CPU requests via Pod resize. Follow-up verification of pinned actuator code: buildPatch sets both requests.cpu and limits.cpu to the target value.",
+        "keypoints": [
+          "通过 Kubernetes Pod resize 子资源原地调整 CPU；所核验 actuator 实现同时调整 requests.cpu 与 limits.cpu，重点是减少敏感服务重启。",
+          "从 kubelet cAdvisor 采集 CPU usage 和 throttling，通过 API server node proxy 访问，不依赖 Prometheus。",
+          "仅调整 policy 指定的容器，避免跟随应用容器一起无谓扩张 sidecar。",
+          "明确区分 HPA 改副本数、Karpenter 改节点供给、VPA 偏长期推荐；EPCAS 不是它们的通用替代。",
+          "QoS、quota、node headroom 及正在进行的 resize 都可能阻止扩容；为连续性增加 CPU requests 有成本溢价。"
+        ],
+        "derived_questions": [
+          {
+            "q": "模型服务不希望重启，CPU 突发时原地扩 CPU、HPA 和 warm replicas 如何取舍？",
+            "answer": "先判断 CPU throttling 还是模型/GPU/队列瓶颈。原地扩容受节点余量与 quota 约束；HPA 有模型加载/预热延迟；温热副本花成本换响应速度。衡量第一轮过载、p99、拒绝率与资源成本。",
+            "lesson": "autoscaling"
+          },
+          {
+            "q": "为什么 CPU request 增加后仍未改善 p99？",
+            "answer": "可能没有足够 node headroom、实际瓶颈并非 CPU，或线程池/模型队列/下游尾延迟没变。观察控制动作是否完成、throttling、queue 和 inference 分解。",
+            "lesson": "capacity"
+          }
+        ],
+        "implementation_evidence_url": "https://github.com/doordash-oss/elastic-cpu-pod-autoscaler/blob/700dd4e664e7ee84be623cf43448e8acaa108e5f/src/main/java/io/elasticcpu/operator/resize/PodResizeActuator.java#L137"
+      },
+      {
+        "id": "official-agentico",
+        "title": "Agentic Orchestrator",
+        "publisher": "DoorDash OSS",
+        "url": "https://github.com/doordash-oss/agentic-orchestrator",
+        "read_url": "https://raw.githubusercontent.com/doordash-oss/agentic-orchestrator/main/README.md",
+        "published_date": null,
+        "kind": "官方开源资料",
+        "access": "原文已读，HTTP 200",
+        "evidence": "README describes a durable engineering workflow: gather context, inquire/research/design, phase plans, implementation, verification, final review, publish.",
+        "keypoints": [
+          "强调从高层需求到可审查 PR 的持久流程，显式建立仓库上下文，避免只依赖单个长对话。",
+          "在实现前进行计划校验；验证与最终审查需要具体证据。",
+          "按 feature 隔离分支、会话和产物，支持并发工作流。",
+          "通过流程状态和人工检查点管理需要判断的步骤，支持多 provider。",
+          "这是公开开源工具，不能据此认定其与目标团队内部系统相同。"
+        ],
+        "derived_questions": [
+          {
+            "q": "设计一个帮助模型开发者自主实验的 agent 平台，如何避免不可复现结果和失控成本？",
+            "answer": "借鉴持久流程、版本化上下文、可恢复状态与验证门槛；再补实验特有的 dataset/model/eval 版本、预算、工具权限、隔离与审计。这是基于公开设计的延伸练习，非该项目已实现能力清单。",
+            "lesson": "developer-platform"
+          }
+        ]
+      },
+      {
+        "id": "official-dqr",
+        "title": "DataQualityReport",
+        "publisher": "DoorDash OSS",
+        "url": "https://github.com/doordash-oss/DataQualityReport",
+        "read_url": "https://raw.githubusercontent.com/doordash-oss/DataQualityReport/main/README.md",
+        "published_date": null,
+        "kind": "官方开源资料",
+        "access": "原文已读，HTTP 200",
+        "evidence": "DataQualityReport aims to quickly make users aware of potential data quality issues in Pandas DataFrames, with diagnostics targeted at under one minute.",
+        "keypoints": [
+          "面向 Pandas DataFrame 的快速数据质量诊断，目标是机器运行时间和用户注意力成本都低。",
+          "README 以小于一分钟为诊断速度目标，鼓励交互开发中频繁使用。",
+          "公开入口是 dqr_table(dataframe)，附有 tutorial notebook。",
+          "该工具是开发阶段数据质量辅助，不应自动等同于生产 Feature Store、实时漂移系统或完整部署 gate。"
+        ],
+        "derived_questions": [
+          {
+            "q": "离线实验中的 DataFrame 质量检查和生产特征监控分别解决什么问题？",
+            "answer": "前者快速发现样本、类型、缺失等问题；生产还需要连续 freshness/schema/缺失率监控、版本与时间语义、成熟标签和回滚。对同一错误保持可复现 golden cases。",
+            "lesson": "observability"
+          }
+        ]
+      },
+      {
+        "id": "nvidia-batching",
+        "title": "Triton Inference Server — Batchers",
+        "publisher": "NVIDIA / Triton",
+        "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md",
+        "read_url": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/batcher.md",
+        "published_date": null,
+        "kind": "技术官方文档",
+        "access": "原文已读，HTTP 200",
+        "evidence": "The documentation recommends starting with default dynamic_batching, measuring latency/throughput, and says preferred_batch_size should not be used for most models.",
+        "keypoints": [
+          "Dynamic batching 面向 stateless 模型，sequence batching 面向需要保持实例/序列状态的模型。",
+          "默认动态批处理尽量凑到模型允许的最大批大小，但不为凑批额外等待。",
+          "先用默认配置测量，再在延迟预算内增加 max batch 或 delay；大多数模型不应默认设置 preferred_batch_size，特殊优化 profile 才可能受益。",
+          "max_queue_delay_microseconds 是凑批延迟；队列容量和超时需通过 max_queue_size、timeout_action、default_timeout_microseconds 等独立配置。",
+          "优先级队列允许高优先级越过低优先级，同优先级内按顺序处理；可配置 preserve_ordering。"
+        ],
+        "derived_questions": [
+          {
+            "q": "max_queue_delay=5ms，为何请求仍排队 80ms？",
+            "answer": "区分为凑批而等待与实例忙碌造成的资源排队。检查到达率/服务率、pending、执行时间；再设置有界队列、deadline、拒绝与扩容。",
+            "lesson": "batching"
+          },
+          {
+            "q": "是否应该给每个模型都设置 preferred_batch_size=[8,16,32]？",
+            "answer": "不能机械照抄。官方建议多数模型不设 preferred；先测 baseline，仅在特定批大小有明显性能收益（如 TensorRT optimization profile）时考虑设置。",
+            "lesson": "triton"
+          }
+        ]
+      },
+      {
+        "id": "nvidia-model-config",
+        "title": "Triton Inference Server — Model Configuration",
+        "publisher": "NVIDIA / Triton",
+        "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md",
+        "read_url": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/model_configuration.md",
+        "published_date": null,
+        "kind": "技术官方文档",
+        "access": "原文已读，HTTP 200",
+        "evidence": "Batching requires compatible first batch dimensions on all inputs/outputs; non-batching models must use max_batch_size=0. Model instances are served after successful configured warm-up.",
+        "keypoints": [
+          "max_batch_size 声明模型支持的批大小；模型自身不符合 batching 约束时需设为 0。",
+          "输入/输出要声明与模型一致的 name、datatype、shape；不能仅改服务器配置就改变模型图。",
+          "instance_group 控制实例数和执行设备，CPU 和 GPU placement 都有不同默认/约束。",
+          "Model warmup 定义预热请求；完成预热的实例才可服务，预热也会影响模型更新速度。",
+          "ensemble 自身不是实体执行实例，不能像普通模型设置 instance_group；组成模型各自管理实例。"
+        ],
+        "derived_questions": [
+          {
+            "q": "新模型容器进程健康，但第一批预测超时，发布系统应加什么 gate？",
+            "answer": "校验模型制品/输入合约，等待 model ready 与代表性 warm-up；保留旧模型温热副本，在性能和功能验证后进入 canary。",
+            "lesson": "deployment"
+          }
+        ]
+      },
+      {
+        "id": "nvidia-metrics",
+        "title": "Triton Inference Server — Metrics",
+        "publisher": "NVIDIA / Triton",
+        "url": "https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md",
+        "read_url": "https://raw.githubusercontent.com/triton-inference-server/server/main/docs/user_guide/metrics.md",
+        "published_date": null,
+        "kind": "技术官方文档",
+        "access": "原文已读，HTTP 200",
+        "evidence": "Metrics distinguish Request Count, Inference Count and Execution Count; average batch size is Inference Count / Execution Count. Latency counters are cumulative durations, not percentiles.",
+        "keypoints": [
+          "单个请求可带多个 items；request、inference、execution 三种计数不能混用。平均执行 batch 可用 inference_count / execution_count（注意缓存和统计窗口口径）。",
+          "pending_request_count 表示已入服务但 backend 尚未开始执行的请求，可能不只对应单一物理队列。",
+          "request、queue、compute input/infer/output duration counters 帮助拆解耗时，但 counter 本身不是 p99。",
+          "分位数需要适当 histogram/summary 或请求级测量，不能从累计时长除以次数得到尾延迟。",
+          "main 分支文档中的 duration histogram 功能标注 experimental，配置与实际部署版本必须核对。"
+        ],
+        "derived_questions": [
+          {
+            "q": "监控显示每秒 1K request、8K inference、500 execution，平均 batch 是多少？能直接得到 p99 吗？",
+            "answer": "在对应窗口且排除缓存口径差异后，平均 batch=8000/500=16。这些 count 不能得出 p99；累计耗时/请求数至多给平均，需要延迟分布。",
+            "lesson": "observability"
+          }
+        ]
+      }
+    ],
+    "blocked_sources": [
+      {
+        "id": "dd-triton-blog",
+        "title": "Triton Auto Tuner: Finding the Right Triton Configuration for Hundreds of Models",
+        "url": "https://careersatdoordash.com/blog/triton-auto-tuner-finding-the-right-triton-configuration-for-hundreds-of-models/",
+        "kind": "官方文章线索",
+        "published_date": null,
+        "access": "CONNECT 403，未读到原文",
+        "note": "标题与 URL 来自现有网站/之前提供的资料；本轮不能独立核实日期与文章技术结论。不得计为已读文章或候选人面经。"
+      },
+      {
+        "id": "dd-engineering-index",
+        "title": "DoorDash Engineering Blog",
+        "url": "https://careersatdoordash.com/blog/",
+        "kind": "官方资料入口",
+        "published_date": null,
+        "access": "CONNECT 403，未读到原文",
+        "note": "无法现场检索 Feature Store/Serving/Training 博客，仍保留官方阅读入口。"
+      }
+    ],
+    "indexed_sources": [
+      {
+        "id": "dd-index-65",
+        "title": "How DoorDash is Scaling its Data Platform to Delight Customers and Meet Growing Demand",
+        "url": "https://doordash.engineering/2020/09/25/how-doordash-is-scaling-its-data-platform/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-09-25",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L65",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 65,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-70",
+        "title": "Introducing Fabricator: A Declarative Feature Engineering Framework",
+        "url": "https://doordash.engineering/2022/01/11/introducing-fabricator-a-declarative-feature-engineering-framework/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-01-11",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L70",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 70,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-76",
+        "title": "Building Scalable Real Time Event Processing with Kafka and Flink",
+        "url": "https://doordash.engineering/2022/08/02/building-scalable-real-time-event-processing-with-kafka-and-flink/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-08-02",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L76",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 76,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-108",
+        "title": "Building a Scalable ML Feature Store with Redis, Binary Serialization, and Compression",
+        "url": "https://doordash.engineering/2020/11/19/building-a-gigascale-ml-feature-store-with-redis/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-11-19",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L108",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 108,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-112",
+        "title": "Building Riviera: A Declarative Real-Time Feature Engineering Framework",
+        "url": "https://doordash.engineering/2021/03/04/building-a-declarative-real-time-feature-engineering-framework/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-03-04",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L112",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 112,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-116",
+        "title": "Building the Model Behind DoorDash’s Expansive Merchant Selection",
+        "url": "https://doordash.engineering/2022/04/19/building-merchant-selection/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-04-19",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L116",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 116,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-136",
+        "title": "Uncovering Online Delivery Menu Best Practices with Machine Learning",
+        "url": "https://doordash.engineering/2020/11/10/uncovering-online-delivery-menu-best-practices-with-machine-learning/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-11-10",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L136",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 136,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-137",
+        "title": "Using a Human-in-the-Loop to Overcome the Cold Start Problem in Menu Item Tagging",
+        "url": "https://doordash.engineering/2020/08/28/overcome-the-cold-start-problem-in-menu-item-tagging/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-08-28",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L137",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 137,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-148",
+        "title": "Solving for Unobserved Data in a Regression Model Using a Simple Data Adjustment",
+        "url": "https://doordash.engineering/2020/10/14/solving-for-unobserved-data-in-a-regression-model/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-10-14",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L148",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 148,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-156",
+        "title": "Retraining Machine Learning Models in the Wake of COVID-19",
+        "url": "https://doordash.engineering/2020/09/15/retraining-ml-models-covid-19/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-09-15",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L156",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 156,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-159",
+        "title": "Managing Supply and Demand Balance Through Machine Learning",
+        "url": "https://doordash.engineering/2021/06/29/managing-supply-and-demand-balance-through-machine-learning/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-06-29",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L159",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 159,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-184",
+        "title": "Powering Search & Recommendations at DoorDash",
+        "url": "https://doordash.news/company/powering-search-recommendations-at-doordash/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2017",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L184",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 184,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-227",
+        "title": "Personalized Cuisine Filter Based on Customer Preference and Local Popularity",
+        "url": "https://doordash.engineering/2020/01/27/personalized-cuisine-filter/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-01-27",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L227",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 227,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-250",
+        "title": "Evolving DoorDash’s Substitution Recommendations Algorithm",
+        "url": "https://doordash.engineering/2022/09/08/evolving-doordashs-substitution-recommendations-algorithm/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-09-08",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L250",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 250,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-251",
+        "title": "Homepage Recommendation with Exploitation and Exploration",
+        "url": "https://doordash.engineering/2022/10/05/homepage-recommendation-with-exploitation-and-exploration/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-10-05",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L251",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 251,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-263",
+        "title": "Powering Search & Recommendations at DoorDash",
+        "url": "https://doordash.engineering/2017/07/06/powering-search-recommendations-at-doordash/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2017-07-06",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L263",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 263,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-300",
+        "title": "Things Not Strings: Understanding Search Intent with Better Recall",
+        "url": "https://doordash.engineering/2020/12/15/understanding-search-intent-with-better-recall/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-12-15",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L300",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 300,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-315",
+        "title": "3 Changes to Expand DoorDash’s Product Search Beyond Delivery",
+        "url": "https://doordash.engineering/2022/05/10/3-changes-to-expand-doordashs-product-search/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-05-10",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L315",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 315,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-329",
+        "title": "Personalized Store Feed with Vector Embeddings",
+        "url": "https://doordash.engineering/2018/04/02/personalized-store-feed-with-vector-embeddings/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2018-04-02",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L329",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 329,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-417",
+        "title": "Reinforcement Learning for On-Demand Logistics",
+        "url": "https://doordash.engineering/2018/09/10/reinforcement-learning-for-on-demand-logistics/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2018-09-10",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L417",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 417,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-426",
+        "title": "Selecting the Best Image for Each Merchant Using Exploration and Machine Learning",
+        "url": "https://doordash.engineering/2023/01/04/selecting-the-best-image-for-each-merchant-using-exploration-and-machine-learning/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2023-01-04",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L426",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 426,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-473",
+        "title": "Next-Generation Optimization for Dasher Dispatch at DoorDash",
+        "url": "https://doordash.engineering/2020/02/28/next-generation-optimization-for-dasher-dispatch-at-doordash/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-02-28",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L473",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 473,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-476",
+        "title": "Optimizing DoorDash’s Marketing Spend with Machine Learning",
+        "url": "https://doordash.engineering/2020/07/31/optimizing-marketing-spend-with-ml/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-07-31",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L476",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 476,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-536",
+        "title": "Improving Experimental Power through Control Using Predictions as Covariate",
+        "url": "https://doordash.engineering/2020/06/08/improving-experimental-power-through-control-using-predictions-as-covariate-cupac/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-06-08",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L536",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 536,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-537",
+        "title": "Supporting Rapid Product Iteration with an Experimentation Analysis Platform",
+        "url": "https://doordash.engineering/2020/09/09/experimentation-analysis-platform-mvp/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-09-09",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L537",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 537,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-538",
+        "title": "Improving Online Experiment Capacity by 4X with Parallelization and Increased Sensitivity",
+        "url": "https://doordash.engineering/2020/10/07/improving-experiment-capacity-by-4x/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-10-07",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L538",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 538,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-539",
+        "title": "Leveraging Causal Modeling to Get More Value from Flat Experiment Results",
+        "url": "https://doordash.engineering/2020/09/18/causal-modeling-to-get-more-value-from-flat-experiment-results/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-09-18",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L539",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 539,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-540",
+        "title": "Iterating Real-time Assignment Algorithms Through Experimentation",
+        "url": "https://doordash.engineering/2020/12/08/optimizing-real-time-algorithms-experimentation/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2020-12-08",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L540",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 540,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-544",
+        "title": "Running Experiments with Google Adwords for Campaign Optimization",
+        "url": "https://doordash.engineering/2021/02/05/google-adwords-campaign-optimization/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-02-05",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L544",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 544,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-545",
+        "title": "The 4 Principles DoorDash Used to Increase Its Logistics Experiment Capacity by 1000%",
+        "url": "https://doordash.engineering/2021/09/21/the-4-principles-doordash-used-to-increase-its-logistics-experiment-capacity-by-1000/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-09-21",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L545",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 545,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-557",
+        "title": "Meet Dash-AB — The Statistics Engine of Experimentation at DoorDash",
+        "url": "https://doordash.engineering/2022/05/24/meet-dash-ab-the-statistics-engine-of-experimentation-at-doordash/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2022-05-24",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L557",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 557,
+        "priority": "supplemental",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-596",
+        "title": "Building Flexible Ensemble ML Models with a Computational Graph",
+        "url": "https://doordash.engineering/2021/01/26/computational-graph-machine-learning-ensemble-model-support/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-01-26",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L596",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 596,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      },
+      {
+        "id": "dd-index-630",
+        "title": "Maintaining Machine Learning Model Accuracy Through Monitoring",
+        "url": "https://doordash.engineering/2021/05/20/monitor-machine-learning-model-drift/",
+        "publisher": "DoorDash（聚合索引标注）",
+        "kind": "官方文章索引线索",
+        "access": "indexed_only",
+        "original_read": false,
+        "index_read": true,
+        "date": "2021-05-20",
+        "date_note": "日期取自索引年份或原文 URL 路径，未独立核实发布时间",
+        "evidence_url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md#L630",
+        "index_repository": "eugeneyan/applied-ml",
+        "index_commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+        "index_line": 630,
+        "priority": "high",
+        "note": "确认可读索引列出该标题和 URL；原站 CONNECT 403，未读正文；不是候选人面经或已证实面试题。"
+      }
+    ],
+    "index_provenance": {
+      "repository": "eugeneyan/applied-ml",
+      "commit": "d58606b6ec039e9cc242f43fd64d16af71cd1297",
+      "url": "https://github.com/eugeneyan/applied-ml/blob/d58606b6ec039e9cc242f43fd64d16af71cd1297/README.md",
+      "read_status": "Pinned README fetched HTTP 200",
+      "doordash_entries": 33
+    },
+    "secondary_index": {
+      "repository": "khangich/machine-learning-interview",
+      "commit": "968a286650c964f8583b73b3e0864475b86f22b6",
+      "read_status": "Pinned README fetched HTTP 200",
+      "entries": [
+        {
+          "title": "Personalized store feed",
+          "url": "https://blog.doordash.com/personalized-store-feed-with-vector-embeddings-251ad7a2c09a",
+          "access": "indexed_only",
+          "evidence_url": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/README.md#L148"
+        },
+        {
+          "title": "Doordash dispatch optimization",
+          "url": "https://doordash.engineering/2020/02/28/next-generation-optimization-for-dasher-dispatch-at-doordash/",
+          "access": "indexed_only",
+          "evidence_url": "https://github.com/khangich/machine-learning-interview/blob/968a286650c964f8583b73b3e0864475b86f22b6/README.md#L149"
+        }
+      ]
+    }
+  },
+  "technical_recheck": {
+    "checked_at": "2026-11-05",
+    "six_official_documents": "HTTP 200; original documentation re-read",
+    "candidate_reports_added": 0,
+    "blocked_retries": [
+      "One DoorDash original article: CONNECT 403",
+      "One Reddit search: CONNECT 403"
+    ],
+    "triton_server_commit": "25419f909746139d2bffc6c7dac351f8c95039e4",
+    "epcas_commit": "700dd4e664e7ee84be623cf43448e8acaa108e5f",
+    "triton_queue_policy_evidence": "https://github.com/triton-inference-server/common/blob/82f8bc7efd8f7d175122eb225ee0fb5c9eb3581d/protobuf/model_config.proto#L1060",
+    "corrections": [
+      "EPCAS inspected code changes BOTH CPU requests and limits",
+      "Batch formation delay does not bound total queue time or end-to-end deadline",
+      "Inference items / backend executions is average executed batch size, not requests per batch",
+      "Duration counters and averages of pod p99 do not determine global p99",
+      "Triton ensemble wrapper has no instance_group; component models can have it"
+    ]
+  }
+}
