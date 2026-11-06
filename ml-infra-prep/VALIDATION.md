@@ -30,9 +30,11 @@
 
 本轮仅重试一篇 DoorDash 原文和一个 Reddit 搜索入口，仍被代理 CONNECT 403 拦截；不将网络限制报告为文章不存在，也没有声称获得新的候选人面经。官方 GitHub 文档可读，检索记录及固定提交证据见 research-audit.json。
 
-部署工作流位于仓库根目录 .github/workflows/deploy-ml-infra.yml，部署分支为 codex/ml-infra-prep。最近已核验的云端失败发生在 actions/configure-pages：仓库尚未启用 Pages，返回 HTTP 404。默认 GITHUB_TOKEN 不能自行启用 Pages；管理员需在仓库 Settings → Pages 的 Source 选择 GitHub Actions。只有部署成功且实际验证网址后，才可称为线上交付。
+网站已正式部署到 https://yuh2k.github.io/PERSONAL/ 。通过发布独立 gh-pages 静态分支，触发 GitHub 内置 Pages 发布，成功运行：https://github.com/yuh2k/PERSONAL/actions/runs/42161100926 。此前 Pages 未启用导致的 404 已通过这条发布路径解决。
 
-工作流在 Pages 配置前上传 ml-infra-ready-to-use 构建产物，包含完整 site-deploy.zip、offline.zip 和 labs.zip。即使托管配置未启用，更新后的离线包和部署包仍可下载使用。
+随后独立执行公开 HTTPS 验证：https://github.com/yuh2k/PERSONAL/actions/runs/42161234873 。检查首页 HTTP 200、23 个完整指南、92 个逐题回答追问及 RESEARCH.md 均通过。验证工作流定义在 .github/workflows/check-ml-infra-public.yml。
+
+这项公网检查在 GitHub Actions 中执行；当前编辑环境的代理仍禁止直接访问 github.io，不将本地代理限制等同于网站不可用。此前完成的 Chromium 交互、移动端与离线回归验证对应同一份发布内容。
 
 ## 复现
 

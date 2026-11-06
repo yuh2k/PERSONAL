@@ -23,11 +23,20 @@
 
 ## 部署
 
-python3 build.py 的输出 dist/site 是完整静态站点。上传该目录到有权限的 Cloudflare Pages、Netlify 或任意静态托管即可。
+正式网站：https://yuh2k.github.io/PERSONAL/
 
-仓库根目录 .github/workflows/deploy-ml-infra.yml 支持 GitHub Pages，已推送独立的 codex/ml-infra-prep 分支。先在 Settings → Pages 选择 GitHub Actions，再重跑工作流；也支持 main 或部署分支的新推送。部署前先上传 ml-infra-ready-to-use 构建产物，即使 Pages 设置未完成也可下载部署/离线包。工作流只发布本子目录，保留原来的 Python 算法文件。相对路径和 hash 路由同时支持根路径和 /PERSONAL/ 项目路径。
+面经与答案：https://yuh2k.github.io/PERSONAL/#interviews
 
-只有部署成功且实际 HTTP 验证后，才能把云端 URL 作为已交付地址。离线交付 offline.zip 含完整网站和 labs.zip；解压后启动 Python 静态服务即可。进度另行导出 JSON。
+已将 build.py 生成的 dist/site 独立发布到 gh-pages 分支（含 .nojekyll），GitHub 自动触发 Pages 发布并成功。无需读者安装 Python 或下载代码。源代码仍在 codex/ml-infra-prep；gh-pages 只保存构建产物。
+
+部署成功记录：https://github.com/yuh2k/PERSONAL/actions/runs/42161100926
+公网验证记录：https://github.com/yuh2k/PERSONAL/actions/runs/42161234873
+
+独立云端检查确认正式 HTTPS 返回 200，且解析数据包含 23 个完整专题与 92 个带答案追问，答案手册可访问。当前编辑环境本身访问 github.io 仍受网络代理限制，公网验证通过 GitHub Actions 执行。
+
+后续手动发布：运行 python3 build.py，将 dist/site 的完整内容同步到 gh-pages 分支的独立工作目录，提交并正常推送（不用 force）；等待 pages build and deployment 成功。应先获取该分支最新提交，避免覆盖其他更新。源代码分支仍保留自定义 Actions 部署工作流；如果将 Pages Source 切换为 GitHub Actions，可使用该路径。
+
+离线包 offline.zip 仍可独立使用。浏览器进度按 origin 保存，更换网址前请导出 JSON，再在正式网站导入。
 
 ## 边界
 
